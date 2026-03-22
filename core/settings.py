@@ -1,4 +1,4 @@
 # core/settings.py
 class Settings():
-    ping_interval = 1000
+    icmp_interval = 1000
 

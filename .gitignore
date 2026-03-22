@@ -2,3 +2,7 @@
 .idea/
 .vscode/
 venv/
+drafts/
+tests/__pycache__
+core/__pycache__
+.pytest_cache
