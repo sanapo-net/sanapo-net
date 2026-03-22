@@ -1,4 +1,5 @@
 # core/orchestrator.py
+import inspect
 import threading
 import asyncio
 import time
@@ -35,7 +36,7 @@ class Orchestrator(threading.Thread):
             await asyncio.sleep(max(0, wait))
 
     def _dispatch(self, cb, msg):
-        if asyncio.iscoroutinefunction(cb):
+        if inspect.iscoroutinefunction(cb):
             asyncio.run_coroutine_threadsafe(cb(msg), self.main_loop)
         else:
             self.executor.submit(cb, msg)
