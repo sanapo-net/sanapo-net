@@ -2,7 +2,7 @@
 import threading
 from collections import OrderedDict
 
-class DataBuffer:
+class Buffer:
     def __init__(self, history_size=1000):
         self._lock = threading.Lock()
         self._history = OrderedDict()

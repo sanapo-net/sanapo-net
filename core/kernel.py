@@ -3,14 +3,14 @@ import asyncio
 
 from core.bus import Bus
 from core.orchestrator import Orchestrator
-from core.data_buffer import DataBuffer
+from core.buffer import Buffer
 from core.settings import Settings
 
 class Kernel:
     def __init__(self):
         self.loop = asyncio.get_event_loop()
         self.bus = Bus(self.loop)
-        self.buffer = DataBuffer()
+        self.buffer = Buffer()
         self.settings = Settings()
         self.orchestrator = Orchestrator(self.bus.get_all, self.loop)
 
