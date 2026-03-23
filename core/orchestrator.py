@@ -1,45 +1,84 @@
 # core/orchestrator.py
-import inspect
 import threading
 import asyncio
-import time
-from concurrent.futures import ThreadPoolExecutor
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
+
+from core.enums import Addr, MsgType, AddressBusyError
+from core.messenger import Messenger
+
+TICK_RATE = 0.025 # seconds
+THREAD_POOL_MAX_SIZE = 20
 
 class Orchestrator(threading.Thread):
-    def __init__(self, fetch_func, main_loop):
+    def __init__(self, bus):
         super().__init__(daemon=True)
-        self.fetch_func = fetch_func
-        self.main_loop = main_loop
-        # subscribe dict: { "EVENT_TYPE": [callback1, callback2] }
-        self.subscribers = defaultdict(list)
-        self.executor = ThreadPoolExecutor(max_workers=20)
-        self.tick_rate = 0.025
+        self.bus = bus
+        self._registry = {}     # {Addr: Messenger, ...}
+        self._subscribers = defaultdict(list) # {EentType: [callbacks], ...}
+        self.executor = ThreadPoolExecutor(max_workers = THREAD_POOL_MAX_SIZE)
+        self.loop = None # for event_loop
+
+    def connect(self, address: Addr) -> Messenger:
+        """Messenger creating wuth Address checking"""
+        if address in self._registry:
+            raise AddressBusyError(f"Address {address} is already taken")
+
+        messenger = Messenger(address, self.bus, self)
+        self._registry[address] = messenger
+        return messenger
 
     def run(self):
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
-        self.loop.run_until_complete(self._main_loop())
+        try:
+            self.loop.run_until_complete(self._main_loop())
+        finally:
+            self.loop.close()
 
     async def _main_loop(self):
+        # Tick time calc
+        next_tick_time = self.loop.time()
         while True:
-            start_time = time.perf_counter()
-            messages = await self.fetch_func()
+            next_tick_time += TICK_RATE
 
+            # Bus reading
+            messages = await self.bus.get_all()
             for msg in messages:
-                event_type = msg.get("event")
-                if event_type in self.subscribers:
-                    for cb in self.subscribers[event_type]:
-                        self._dispatch(cb, msg)
+                msg_type = msg.get("type")
 
-            wait = self.tick_rate - (time.perf_counter() - start_time)
-            await asyncio.sleep(max(0, wait))
+                # Command or report
+                if msg_type in [MsgType.COMMAND, MsgType.REPORT]:
+                    target_addr = msg.get("to")
+                    if target_addr in self._registry:
+                        target = self._registry[target_addr]
+                        # Command -> target_module_messeger.on_command(msg)
+                        if msg_type == MsgType.COMMAND:
+                            self.dispatch(target.on_command, msg)
+                        # Report -> target_module_messeger.incoming_report_reaction(msg)
+                        else:
+                            self.dispatch(target.incoming_report_reaction, msg)
 
-    def _dispatch(self, cb, msg):
-        if inspect.iscoroutinefunction(cb):
-            asyncio.run_coroutine_threadsafe(cb(msg), self.main_loop)
-        else:
-            self.executor.submit(cb, msg)
+                # Event
+                elif msg_type == MsgType.EVENT:
+                    e_type = msg.get("event")
+                    for cb in self._subscribers.get(e_type, []):
+                        self.dispatch(cb, msg)
+
+            # Check for expired requests (timeouts) in all messengers
+            for messenger in self._registry.values():
+                messenger.check_timeouts()
+
+            # Tick time calc
+            now_time = self.loop.time()
+            wait_time = next_tick_time - now_time
+            if wait_time > 0:
+                await asyncio.sleep(wait_time)
+            else:
+                next_tick_time = now_time
+
+    def dispatch(self, cb, msg):
+        self.executor.submit(cb, msg)
 
     def subscribe(self, event_type, cb):
-        self.subscribers[event_type].append(cb)
+        self._subscribers[event_type].append(cb)

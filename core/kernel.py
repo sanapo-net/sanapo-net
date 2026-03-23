@@ -1,6 +1,7 @@
 # core/kernel.py
 import asyncio
 
+from core.enums import Addr, AddressBusyError
 from core.bus import Bus
 from core.orchestrator import Orchestrator
 from core.buffer import Buffer
@@ -12,23 +13,15 @@ class Kernel:
         self.bus = Bus(self.loop)
         self.buffer = Buffer()
         self.settings = Settings()
-        self.orchestrator = Orchestrator(self.bus.get_all, self.loop)
-
-    def subscribe(self, event_type, cb):
-        """method wrapper for orchestrator.subscribe()"""
-        self.orchestrator.subscribe(event_type, cb)
-
-    def emit(self, msg):
-        """method wrapper for bus.send()"""
-        self.bus.send(msg)
+        self.orchestrator = Orchestrator(self.bus.get_all)
+        try:
+            self.msg = self.orchestrator.connect(Addr.KERNEL)
+        except AddressBusyError:
+            print("Kernel is registred already!")
+            return
 
     async def launch(self):
         """core starter"""
-        # it start core
         self.orchestrator.start()
-
-        # send message for start
-        self.emit({"event": "ENGINE_START", "interval": self.settings.ping_interval})
-
         while True:
             await asyncio.sleep(1)
