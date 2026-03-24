@@ -22,10 +22,12 @@ class EvtType(str, Enum):
     ERR = "err"
     LOG = "log"
     BUS_IS_OVERCROWDED = "bus_is_overcrowded"
+    BUFFER_NEW_DATA = "buffer_new_data"
 
 @unique
 class CmdType(str, Enum):
     """CommandType for the shared bus"""
+    STOP_APP = "stop_app"
     TEST = "test"
 
 class SanapoError(Exception): pass
