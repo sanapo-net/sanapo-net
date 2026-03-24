@@ -4,7 +4,7 @@ import asyncio
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
-from core.enums import Addr, MsgType, AddressBusyError
+from core.enums import Addr, MsgType, AddressBusyError, MessageTypeError
 from core.messenger import Messenger
 
 TICK_RATE = 0.025 # seconds
@@ -45,29 +45,24 @@ class Orchestrator(threading.Thread):
             # Bus reading
             messages = await self.bus.get_all()
             for msg in messages:
-                msg_type = msg.get("type")
+                msg_type = msg.msg_type
 
-                # Command or report
+                # For commands and reports
                 if msg_type in [MsgType.COMMAND, MsgType.REPORT]:
-                    target_addr = msg.get("to")
-                    if target_addr in self._registry:
-                        target = self._registry[target_addr]
-                        # Command -> target_module_messeger.on_command(msg)
-                        if msg_type == MsgType.COMMAND:
-                            self.dispatch(target.on_command, msg)
-                        # Report -> target_module_messeger.incoming_report_reaction(msg)
-                        else:
-                            self.dispatch(target.incoming_report_reaction, msg)
+                    target = self._registry.get(msg.recipient)
+                    if msg_type == MsgType.COMMAND:
+                        handler = target._handle_incoming_command
+                    else:
+                        handler = target._handle_incoming_report
+                    self._dispatch(handler, msg)
 
-                # Event
-                elif msg_type == MsgType.EVENT:
-                    e_type = msg.get("event")
-                    for cb in self._subscribers.get(e_type, []):
-                        self.dispatch(cb, msg)
+                # For events
+                elif msg.msg_type == MsgType.EVENT:
+                    for messenger in self._registry.values():
+                        self._dispatch(messenger._handle_incoming_event, msg)
 
-            # Check for expired requests (timeouts) in all messengers
-            for messenger in self._registry.values():
-                messenger.check_timeouts()
+                else:
+                    raise MessageTypeError(f"MessageTypeError: {msg.msg_type}")
 
             # Tick time calc
             now_time = self.loop.time()
@@ -77,8 +72,6 @@ class Orchestrator(threading.Thread):
             else:
                 next_tick_time = now_time
 
-    def dispatch(self, cb, msg):
-        self.executor.submit(cb, msg)
-
-    def subscribe(self, event_type, cb):
-        self._subscribers[event_type].append(cb)
+    def _dispatch(self, handler, msg):
+        """Put task to the messenger"""
+        self.executor.submit(handler, msg)

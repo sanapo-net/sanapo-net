@@ -32,4 +32,7 @@ class CmdType(str, Enum):
 
 class SanapoError(Exception): pass
 class AddressBusyError(SanapoError): pass
+class MessageTypeError(SanapoError): pass
+class UnknownCmdError(SanapoError): pass
+class UnknownEvtError(SanapoError): pass
 class UnknownRecipientError(SanapoError): pass
