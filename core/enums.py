@@ -23,16 +23,28 @@ class EvtType(str, Enum):
     LOG = "log"
     BUS_IS_OVERCROWDED = "bus_is_overcrowded"
     BUFFER_NEW_DATA = "buffer_new_data"
+    EVT_TEST = "evt_test"
 
 @unique
 class CmdType(str, Enum):
     """CommandType for the shared bus"""
     STOP_APP = "stop_app"
-    TEST = "test"
+    CANCEL_TASK = "cancel_task"
+    CMD_TEST = "cmd_test"
+
+@unique
+class RptType(str, Enum):
+    """CommandType for the shared bus"""
+    DONE = "done"
+    INTO_WORK = "into_work"
+    GIVE_ME_TIME = "give_me_time"
+    CANT_TO_DO = "cant_to_do"
 
 class SanapoError(Exception): pass
 class AddressBusyError(SanapoError): pass
 class MessageTypeError(SanapoError): pass
+class MessageInitError(SanapoError): pass
 class UnknownCmdError(SanapoError): pass
 class UnknownEvtError(SanapoError): pass
+class UnknownRptError(SanapoError): pass
 class UnknownRecipientError(SanapoError): pass

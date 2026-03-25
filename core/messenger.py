@@ -2,7 +2,8 @@
 from core import enums
 from core.protocol import Frame
 
-DEFAULT_CMD_TIMEOUT = 5.0 # seconds
+DEFAULT_CMD_DEADLINE_ANSW = 0.05 # seconds
+DEFAULT_CMD_DEADLINE_DONE = 0.8 # seconds
 
 class Messenger:
     """
@@ -11,11 +12,16 @@ class Messenger:
     using the Frame protocol.
     """
 
+    # Semantic constants for deadline management
+    KEEP = 0.0          # No change to current deadline
+    FAIL = -float('inf')# Task expires immediately (lower than any current time)
+    EVER = float('inf') # Task never expires (higher than any current time)
+
     def __init__(self, address: enums.Addr, bus, orchestrator):
         self.address = address
         self._bus = bus
         self._orch = orchestrator
-        self._counter = 0
+        self._cmd_counter = 0
         self._command_handlers = {}  # {CmdType: function, ...}
         self._event_handlers = {}    # {EvtType: function, ...}
         self._pending_reports = {}   # {cmd_id: {callback, timeout_cb, expire_at}, ...}
@@ -24,36 +30,55 @@ class Messenger:
             self,
             recipient: enums.Addr,
             cmd_type: enums.CmdType,
-            payload = None,
-            on_report = None,
-            on_timeout = None,
-            timeout = DEFAULT_CMD_TIMEOUT
+            cb,
+            cb_done = None,
+            cb_canttodo = None,
+            cb_timeout_answ = None,
+            cb_timeout_done = None,
+            cb_givemetime = None,
+            deadline_answ_dur = DEFAULT_CMD_DEADLINE_ANSW,
+            deadline_done_dur = DEFAULT_CMD_DEADLINE_DONE,
+            payload = None
         ):
         """
         Send a command, payload, callbacks and track its report with a timeout.
         Called only by the a module.
         """
-        self._counter += 1
-        cmd_id = f"{self.address}_{self._counter}"
+        self._cmd_counter += 1
+        cmd_id = f"{self.address}_{self._cmd_counter}"
+        
+        cb_done = cb_done or cb
+        cb_canttodo = cb_canttodo or cb
+        cb_timeout_answ = cb_timeout_answ or cb
+        cb_timeout_done = cb_timeout_done or cb
+        cb_givemetime = cb_givemetime or cb
 
         # Use orchestrator's loop time for precise tracking
         now = self._orch.loop.time() if self._orch.loop else 0
+        deadline_answ = now + deadline_answ_dur
+        deadline_done = now + deadline_done_dur
 
         self._pending_reports[cmd_id] = {
-            "callback": on_report,
-            "timeout_cb": on_timeout,
-            "expire_at": now + timeout,
+            "recipient": recipient,
+            "cb_done": cb_done,
+            "cb_canttodo": cb_canttodo,
+            "cb_timeout_answ": cb_timeout_answ,
+            "cb_timeout_done": cb_timeout_done,
+            "cb_givemetime": cb_givemetime,
+            "deadline_answ": deadline_answ,
+            "deadline_done": deadline_done,
             "payload": payload
         }
 
         # Pack data into a Frame object
         frame = Frame(
             msg_type = enums.MsgType.COMMAND,
+            cmd_type = cmd_type,
             sender = self.address,
             recipient = recipient,
-            cmd = cmd_type,
             cmd_id = cmd_id,
-            payload = payload
+            payload = payload,
+            deadline_done = deadline_done
         )
         self._bus.send(frame)
 
@@ -64,24 +89,34 @@ class Messenger:
         """
         frame = Frame(
             msg_type = enums.MsgType.EVENT,
+            evt_type = event_type,
             sender = self.address,
-            evt = event_type,
             payload = payload
         )
         self._bus.send(frame)
 
-    def send_rpt(self, recipient: enums.Addr, cmd_id: str, payload = None):
+    def send_rpt(
+            self,
+            rpt_type: enums.RptType,
+            recipient: enums.Addr,
+            cmd_id: str,
+            givemetime = None,
+            payload = None
+        ):
         """
         Reply to a command with a report frame.
         Called only by the a module.
         """
         frame = Frame(
             msg_type = enums.MsgType.REPORT,
+            rpt_type = rpt_type,
             sender = self.address,
             recipient = recipient,
             cmd_id = cmd_id,
             payload = payload
         )
+        if rpt_type == enums.RptType.GIVE_ME_TIME:
+            frame.givemetime = givemetime
         self._bus.send(frame)
 
     def setup_handlers(self, events: dict = None, commands: dict = None, ):
@@ -116,32 +151,51 @@ class Messenger:
         elif evt_type and evt_type in self._event_handlers:
             del self._event_handlers[evt_type]
 
+    def modify_deadline(self, cmd_id: str, add_to_deadline: float):
+        """
+        Adjusts the command deadline:
+        - float: Adds specified seconds to the current deadline.
+        - FAIL: Cancels the task; Messenger triggers the timeout-callback immediately.
+        - EVER: Messenger waits for the report indefinitely.
+        - KEEP: No changes are made to the current deadline.
+        """
+        if cmd_id in self._pending_reports:
+            self._pending_reports[cmd_id]["deadline_done"] += add_to_deadline
+
+    def _send_cancel_task(self, recipient: enums.Addr, cmd_id: str):
+        frame = Frame(
+            msg_type = enums.MsgType.COMMAND,
+            cmd_type = enums.CmdType.CANCEL_TASK,
+            sender = self.address,
+            recipient = recipient,
+            cmd_id = cmd_id
+        )
+        self._bus.send(frame)
+
 
     def _handle_incoming_command(self, msg):
         """
         Internal: Handles an incoming command from the Bus.
         Called only by the Orchestrator.
         """
-        cmd_type = msg.cmd
-        handler = self._command_handlers.get(cmd_type)
+        handler = self._command_handlers.get(msg.cmd_type)
         if handler:
             # Call command-callback of module (take it from _command_handlers)
             handler(msg)
         else:
-            raise enums.UnknownCmdError(f"UnknownCmdError: {cmd_type}")   
+            raise enums.UnknownCmdError(f"UnknownCmdError: {msg.cmd_type}")   
 
     def _handle_incoming_event(self, msg):
         """
         Internal: Handles an incoming event from the Bus.
         Called only by the Orchestrator.
         """
-        evt_type = msg.evt
-        handler = self._event_handlers.get(evt_type)
+        handler = self._event_handlers.get(msg.evt_type)
         if handler:
             # Call event-callback of module (take it from _command_handlers)
             handler(msg)
         else:
-            raise enums.UnknownEvtError(f"UnknownCmdError: {evt_type}") 
+            raise enums.UnknownEvtError(f"UnknownCmdError: {msg.evt_type}") 
 
     def _handle_incoming_report(self, msg: Frame):
         """
@@ -151,20 +205,36 @@ class Messenger:
         cmd_id = msg.cmd_id
         if cmd_id in self._pending_reports:
             entry = self._pending_reports.pop(cmd_id)
-            if entry["callback"]:
-                # Execute callback via thread pool
-                self._orch._dispatch(entry["callback"], msg)
+            data = {"payload": entry["payload"], "msg": msg}
+            if msg.rpt_type == enums.RptType.INTO_WORK:
+                entry["deadline_answ"] = Messenger.EVER
+
+            elif msg.rpt_type == enums.RptType.GIVE_ME_TIME:
+                data["call_reason"] = "givemetime"
+                self._orch._dispatch(entry["cb_givemetime"], data)
+
+            elif msg.rpt_type == enums.RptType.DONE:
+                data["call_reason"] = "done"
+                self._orch._dispatch(entry["cb_done"], data)
+                entry = self._pending_reports.pop(cmd_id)
+
+            elif msg.rpt_type == enums.RptType.CANT_TO_DO:
+                data["call_reason"] = "canttodo"
+                self._orch._dispatch(entry["cb_canttodo"], data)
+                entry = self._pending_reports.pop(cmd_id)
+
+            else:
+                raise enums.UnknownRptError(f"UnknownRptError: {msg.rpt_type}") 
 
     def _check_timeouts(self, now: float):
         """
         Check all pending commands against current loop time.
         Called only by the Orchestrator.
         """
-        # list() is used to allow dictionary modification during iteration
         for cmd_id, entry in list(self._pending_reports.items()):
-            if now > entry["expire_at"]:
-                self._pending_reports.pop(cmd_id)
-                if entry["timeout_cb"]:
-                    # Dispatch timeout notice
-                    self._orch._dispatch(entry["timeout_cb"], entry["payload"])
-
+            for key, cb in [("deadline_answ", "cb_timeout"), ("deadline_done", "cb_done")]:
+                if now > entry[key]:
+                    self._pending_reports.pop(cmd_id)
+                    self._send_cancel_task(entry["recipient"], cmd_id)
+                    self._orch._dispatch(entry[cb], {"call_reason": key, "cmd_id": cmd_id, **entry})
+                    break

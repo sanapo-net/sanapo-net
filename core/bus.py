@@ -42,7 +42,7 @@ class Bus:
             msg = Frame(
                 msg_type = MsgType.EVENT,
                 sender = Addr.BUS,
-                evt = EvtType.BUS_IS_OVERCROWDED
+                evt_type = EvtType.BUS_IS_OVERCROWDED
             )
             self.send(msg)
         return items

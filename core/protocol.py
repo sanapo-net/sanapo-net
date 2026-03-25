@@ -1,7 +1,7 @@
 # core/protocol.py
 from dataclasses import dataclass
 from typing import Optional, Any, Union
-from core.enums import MsgType, Addr
+from core.enums import MsgType, Addr, RptType, MessageInitError
 
 @dataclass(frozen=True)
 class Frame:
@@ -11,13 +11,34 @@ class Frame:
     The 'frozen=True' parameter makes the instance immutable,
     preventing accidental data modification during dispatching.
     """
-    # Mandatory fields
     msg_type: MsgType
     sender: Addr
-
-    # Optional fields (must have default values and follow mandatory ones)
-    recipient: Addr = None
-    payload: Any = None
+    evt_type: Optional[str] = None
+    cmd_type: Optional[str] = None
+    rpt_type: Optional[str] = None
+    recipient: Optional[Addr] = None # Исправлено: Addr -> Optional[Addr]
     cmd_id: Optional[str] = None
-    evt: Optional[str] = None
-    cmd: Optional[str] = None
+    deadline: Optional[float] = None # Рекомендую float для точности
+    givemetime: Optional[str] = None
+    payload: Any = None
+
+    def __post_init__(self):
+        if not isinstance(self.msg_type, MsgType):
+            raise MessageInitError(f"msg_type must be MsgType, not {type(self.msg_type)}")
+        if not isinstance(self.sender, Addr):
+            raise MessageInitError(f"sender must be Addr, not {type(self.sender)}")
+
+        def check_fields(*fields):
+            for field in fields:
+                if getattr(self, field) is None:
+                    raise MessageInitError(f"Field '{field}' is mandatory for {self.msg_type}")
+
+        if self.msg_type == MsgType.COMMAND:
+            check_fields('cmd_type', 'recipient', 'cmd_id')
+        elif self.msg_type == MsgType.EVENT:
+            check_fields('evt_type')
+        elif self.msg_type == MsgType.REPORT:
+            check_fields('rpt_type', 'recipient', 'cmd_id')
+            if self.rpt_type == RptType.GIVE_ME_TIME:
+                check_fields('givemetime')
+
