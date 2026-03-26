@@ -9,11 +9,11 @@ from core.settings import Settings
 
 class Kernel:
     def __init__(self):
-        self.loop = asyncio.get_event_loop()
-        self.bus = Bus(self.loop)
-        self.buffer = Buffer()
         self.settings = Settings()
-        self.orchestrator = Orchestrator(self.bus.get_all)
+        self.loop = asyncio.get_event_loop()
+        self.bus = Bus(self) #self.loop
+        self.buffer = Buffer(self)
+        self.orchestrator = Orchestrator(self) #self.bus.get_all
         try:
             self.msg = self.orchestrator.connect(Addr.KERNEL)
         except AddressBusyError:
@@ -43,5 +43,5 @@ class Kernel:
     async def launch(self):
         """core starter"""
         self.orchestrator.start()
-        while True:
-            await asyncio.sleep(1)
+        while self.orchestrator.is_running:
+            await asyncio.sleep(0.0001)
