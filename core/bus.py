@@ -4,11 +4,10 @@ import asyncio
 from core.protocol import Frame
 from core.enums import MsgType, Addr, EvtType
 
-BUS_GET_ALL_LIMIT = 200
-
 class Bus:
-    def __init__(self, loop):
-        self._loop = loop
+    def __init__(self, kernel):
+        self.kernel = kernel
+        self._loop = kernel.loop
         self._queue = asyncio.Queue()
 
     def send(self, message):
@@ -30,7 +29,7 @@ class Bus:
         If limit is achieved, publication event
         """
         items = []
-        while len(items) < BUS_GET_ALL_LIMIT:
+        while len(items) < self.kernel.settings.BUS_READ_LIMIT:
             try:
                 msg = self._queue.get_nowait()
                 #msg = await self._queue.get()
@@ -38,7 +37,7 @@ class Bus:
                 self._queue.task_done()
             except asyncio.QueueEmpty:
                 break
-        if len(items) == BUS_GET_ALL_LIMIT:
+        if len(items) == self.kernel.settings.BUS_READ_LIMIT:
             msg = Frame(
                 msg_type = MsgType.EVENT,
                 sender = Addr.BUS,

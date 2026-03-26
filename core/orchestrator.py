@@ -7,16 +7,13 @@ from concurrent.futures import ThreadPoolExecutor
 from core.enums import Addr, MsgType, AddressBusyError, MessageTypeError
 from core.messenger import Messenger
 
-TICK_RATE = 0.025 # seconds
-THREAD_POOL_MAX_SIZE = 20
-
 class Orchestrator(threading.Thread):
-    def __init__(self, bus):
+    def __init__(self, kernel):
         super().__init__(daemon=True)
-        self.bus = bus
+        self.kernel = kernel
         self._registry = {}     # {Addr: Messenger, ...}
         self._subscribers = defaultdict(list) # {EentType: [callbacks], ...}
-        self.executor = ThreadPoolExecutor(max_workers = THREAD_POOL_MAX_SIZE)
+        self.executor = ThreadPoolExecutor(max_workers = self.kernel.settings.THREAD_POOL_MAX_SIZE)
         self.loop = None # for event_loop
 
     def connect(self, address: Addr) -> Messenger:
@@ -24,7 +21,7 @@ class Orchestrator(threading.Thread):
         if address in self._registry:
             raise AddressBusyError(f"Address {address} is already taken")
 
-        messenger = Messenger(address, self.bus, self)
+        messenger = Messenger(address, self.kernel.bus, self)
         self._registry[address] = messenger
         return messenger
 
@@ -40,10 +37,10 @@ class Orchestrator(threading.Thread):
         # Tick time calc
         next_tick_time = self.loop.time()
         while True:
-            next_tick_time += TICK_RATE
+            next_tick_time += self.kernel.settings.TICK_RATE
 
             # Bus reading
-            messages = await self.bus.get_all()
+            messages = await self.kernel.bus.get_all()
             for msg in messages:
                 msg_type = msg.msg_type
 
