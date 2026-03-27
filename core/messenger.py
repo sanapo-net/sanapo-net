@@ -129,7 +129,7 @@ class Messenger:
         if events:
             self._event_handlers.update(events)
 
-    def subscribe(self, cb, cmd_type: enums.CmdType = None, evt_type: enums.EntType = None):
+    def subscribe(self, cb, cmd_type: enums.CmdType = None, evt_type: enums.EvtType = None):
         """
         Register a callback for a event or a command.
         Called only by the a module.
@@ -139,7 +139,7 @@ class Messenger:
         elif evt_type:
             self._event_handlers[evt_type] = cb
 
-    def unsubscribe(self, cmd_type: enums.CmdType = None, evt_type: enums.EntType = None):
+    def unsubscribe(self, cmd_type: enums.CmdType = None, evt_type: enums.EvtType = None):
         """
         Unregister a callback for a command or an event.
         Removes the instruction from the secretary's folders.

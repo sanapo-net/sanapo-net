@@ -15,7 +15,7 @@ class Kernel:
         self.buffer = Buffer(self)
         self.orchestrator = Orchestrator(self) #self.bus.get_all
         try:
-            self.msg = self.orchestrator.connect(Addr.KERNEL)
+            self.messenger = self.orchestrator.connect(Addr.KERNEL)
         except AddressBusyError:
             print("Kernel is registred already!")
             return

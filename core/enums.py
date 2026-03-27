@@ -5,6 +5,7 @@ class Addr(str, Enum):
     KERNEL = "kernel"
     BUS = "bus",
     ORCHESTRATOR = "orchestrator"
+    BUFFER = "buffer"
     NETWORK = "network"
     NETWORK_DB = "network_db"
     ENGINE = "engine"

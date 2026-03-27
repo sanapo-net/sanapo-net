@@ -1,8 +1,10 @@
 # tests/utils.py
+import matplotlib.pyplot as plt
+
 import random
 import threading
 import math
-import matplotlib.pyplot as plt
+import os
 from pathlib import Path
 from typing import Optional, Literal
 
@@ -152,3 +154,43 @@ def visualize_generator(**kwargs):
     # Adjust X-axis to see the range properly
     plt.xlim(min(e_min, min(data)) - 5, max(e_max, max(data)) + 5)
     plt.show()
+
+class SeededGenerator:
+    def __init__(
+            self,
+            seed_path,
+            per95_min,
+            per95_max,
+            em_min=0,
+            em_max=0,
+            kurtosis=0.5,
+            em_possible=0
+        ):
+        self.params = (per95_min, per95_max, em_min, em_max, kurtosis, em_possible)
+        
+        # Если файл с сидом есть — читаем, если нет — генерим новый
+        if os.path.exists(seed_path):
+            with open(seed_path, 'r') as f:
+                self.seed = int(f.read())
+        else:
+            self.seed = random.randint(0, 10**9)
+            os.makedirs(os.path.dirname(seed_path), exist_ok=True)
+            with open(seed_path, 'w') as f:
+                f.write(str(self.seed))
+        
+        self.rng = random.Random(self.seed)
+
+    def next_ms(self):
+        p = self.params
+        base_val = self.rng.betavariate(2 - p[4], 2 - p[4])
+        val = p[0] + base_val * (p[1] - p[0])
+        
+        if self.rng.random() < p[5]:
+            val = self.rng.uniform(p[2], p[3])
+        return val
+
+    def next_sec(self):
+        return self.next_ms() / 1000.0
+
+    def next_int(self, a, b):
+        return self.rng.randint(a, b)

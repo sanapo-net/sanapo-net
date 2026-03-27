@@ -4,5 +4,6 @@
 venv/
 drafts/
 tests/__pycache__
+tests/stress_test/__pycache__
 core/__pycache__
 .pytest_cache
