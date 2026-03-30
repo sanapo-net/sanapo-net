@@ -1,4 +1,5 @@
 # core/enums.py
+# ToDo: in future all replacy as auto()
 from enum import Enum, unique
 
 class Addr(str, Enum):
@@ -38,6 +39,18 @@ class RptType(str, Enum):
     INTO_WORK = "into_work"
     TIME_EXTENSION_REQUEST = "time_ext_req"
     CANT_DO = "cant_do"
+
+@unique
+class RptReason(str, Enum):
+    """For CANT_DO and TIME_EXTENSION_REQUEST"""
+    OK = "OK"
+    SEE_PAYLOAD = "SEE_PAYLOAD"
+    
+    # Rejection reasons (CANT_DO)
+    MODULE_BUSY = "MODULE_BUSY"         # Single-threaded module is occupied
+    INVALID_ARGS = "INVALID_ARGS"       # Command payload is corrupted or invalid
+    RESOURCE_LOCKED = "RESOURCE_LOCKED" # Hardware or file is busy
+    INTERNAL_ERROR = "INTERNAL_ERROR"   # Unhandled exception in module
 
 class SanapoError(Exception): pass
 class AddressBusyError(SanapoError): pass

@@ -23,10 +23,15 @@ class Secretary:
         self.address = address
         self._inbox = tools.inbox      # Read-only queue from Kernel
         self._outbox = tools.outbox    # Write-only queue to Kernel
-        self.settings = tools.settings
+        self.config = tools.config
         self._cmd_counter = 0
         self._handlers_cmd: Dict[enums.CmdType, Callable] = {}
         self._handlers_evt: Dict[enums.EvtType, Callable] = {}
+        # Performance & Concurrency config
+        self.tick_rate = self.config.get_secretary_tick(address.name)
+        self.has_thread_pool = False  # Set to True by module if it uses own threads
+        self.is_busy = False          # Internal flag for single-threaded modules
+        self.console_log_enabled = True   # Toggle for health monitoring logs
         
         # Commands sent by this Massenger (as Commander)
         self._pending_out = {} # {cmd_id: {callbacks, deadlines, recipient, payload}}
@@ -37,7 +42,7 @@ class Secretary:
         self._is_running = False
         self._thread: Optional[threading.Thread] = None
 
-    # Lifecycle management
+    # === Lifecycle management ===
 
     def start(self):
         """Starts the background worker for message processing and deadline checks."""
@@ -67,11 +72,13 @@ class Secretary:
             start_time = time.perf_counter()
             self.process_once()
             work_duration = time.perf_counter() - start_time
-            sleep_time = self.settings.SECRETARY_TICK_RATE - work_duration
+            sleep_time = self.tick_rate - work_duration
             if sleep_time > 0:
                 time.sleep(sleep_time)
+            else:    
+                time.sleep(0) # Yield for other threads
 
-    # Subscriptions
+    # === Subscriptions ===
 
     def subscribe(self,
             cb: Callable,
@@ -95,7 +102,7 @@ class Secretary:
         if events: self._handlers_evt.update(events)
         if commands: self._handlers_cmd.update(commands)
 
-    # Outgoing messages
+    # === Outgoing messages ===
 
     def send_evt(self, evt_type: enums.EvtType, payload: Any = None):
         """Broadcast an event to the system bus."""
@@ -136,8 +143,8 @@ class Secretary:
         cb_time_ext_req = cb_time_ext_req or cb
 
         # Calculate absolute deadlines
-        d_answ = now + (deadline_answ_dur or self.settings.DEFAULT_CMD_DEADLINE_ANSW)
-        d_done = now + (deadline_done_dur or self.settings.DEFAULT_CMD_DEADLINE_DONE)
+        d_answ = now + (deadline_answ_dur or self.config.DEFAULT_CMD_DEADLINE_ANSW)
+        d_done = now + (deadline_done_dur or self.config.DEFAULT_CMD_DEADLINE_DONE)
 
         self._pending_out[cmd_id] = {
             "cb_done": cb_done,
@@ -190,11 +197,9 @@ class Secretary:
 
         # Cleanup if the task is finished
         if rpt_type in [enums.RptType.DONE, enums.RptType.CANT_DO]:
+            self.is_busy = False
             self._pending_in.pop(cmd_id, None)
 
-        # Clean up tracking if the task is finished from our side
-        if rpt_type in [enums.RptType.DONE, enums.RptType.CANT_DO]:
-            self._pending_in.pop(cmd_id, None)
 
     def modify_deadline(self, cmd_id: str, add_to_deadline: float):
         """Allows a commander to adjust the deadline of an active command."""
@@ -206,7 +211,7 @@ class Secretary:
             else:
                 self._pending_out[cmd_id]["deadline_done"] += add_to_deadline
 
-    # Internal logic
+    # === Internal logic ===
 
     def _read_inbox(self):
         """Fetches messages from the personal module inbox."""
@@ -221,17 +226,35 @@ class Secretary:
         """Processes a single incoming frame."""
         now = time.perf_counter()
 
+        # For single-threaded modules: Busy Management
+        if frame.msg_type == enums.MsgType.COMMAND:
+            # if the module does not have a thread pool and [is still busy] has not sent a report CANT_DO/DONE
+            if not self.has_thread_pool and self.is_busy:
+                self.send_rpt(
+                    recipient=frame.sender,
+                    cmd_id=frame.cmd_id,
+                    rpt_type=enums.RptType.CANT_DO,
+                    reason=enums.RptReason.MODULE_BUSY,
+                    payload=f"Module {self.address.name} is currently processing another task."
+                )
+                return
+
+        # For pool-threaded modules:
+        # For console logging
+        start_ts = time.perf_counter()
+            
         if frame.msg_type == enums.MsgType.EVENT:
             handler = self._handlers_evt.get(frame.evt_type)
             if handler: handler(frame)
 
         elif frame.msg_type == enums.MsgType.COMMAND:
-            # Secretary automatically replies with INTO_WORK as a handshake
+            # Automatic handshake (Secretary replies with INTO_WORK as a handshake)
             self.send_rpt(frame.sender, frame.cmd_id, enums.RptType.INTO_WORK)
+            self.is_busy = True # Lock for new commands if single-threaded
             
             # Monitor this command for automatic TIME_EXTENSION_REQUEST requests
             self._pending_in[frame.cmd_id] = {
-                "deadline": frame.deadline or (now + 1.0),
+                "deadline": frame.deadline,
                 "sender": frame.sender
             }
             
@@ -243,6 +266,10 @@ class Secretary:
 
         elif frame.msg_type == enums.MsgType.REPORT:
             self._handle_report(frame)
+
+        # For console logging: checking durations and alarm if the work was long
+        duration_ms = (time.perf_counter() - start_ts)
+        self._log_latency(duration_ms, frame)
 
     def _handle_report(self, frame: Frame):
         """Handles incoming reports for commands sent by this module."""
@@ -260,7 +287,7 @@ class Secretary:
             info["cb_canttodo"](frame)
             self._pending_out.pop(frame.cmd_id)
 
-        elif frame.rpt_type == enums.RptType.GIVE_ME_TIME:
+        elif frame.rpt_type == enums.RptType.TIME_EXTENSION_REQUEST:
             if frame.time_ext_req:
                 info["deadline_done"] += frame.time_ext_req
             info["cb_time_ext_req"](frame)
@@ -269,7 +296,7 @@ class Secretary:
         """Validates all time constraints for outgoing and incoming tasks."""
         now = time.perf_counter()
 
-        # 1. Check outgoing commands (waiting for Executor to act)
+        # Check outgoing commands (waiting for Executor to act)
         for cmd_id, info in list(self._pending_out.items()):
             if now > info["deadline_answ"]:
                 info["cb_timeout_answ"]({"cmd_id": cmd_id, "reason": "Reaction Timeout"})
@@ -278,12 +305,12 @@ class Secretary:
                 info["cb_timeout_done"]({"cmd_id": cmd_id, "reason": "Execution Timeout"})
                 self._pending_out.pop(cmd_id)
 
-        # 2. Automatic deadline extension (when we are the Executor)
+        # Automatic deadline extension (when we are the Executor)
         # If remaining time is below threshold - automatically request more time
-        threshold = self.settings.DEADLINE_EXTENSION_THRESHOLD 
+        threshold = self.config.DEADLINE_EXTENSION_THRESHOLD 
         for cmd_id, info in list(self._pending_in.items()):
             if info["deadline"] - now < threshold:
-                extension = self.settings.DEFAULT_TIME_EXTENSION
+                extension = self.config.DEFAULT_TIME_EXTENSION
                 self.send_rpt(
                     info["sender"],
                     cmd_id,
@@ -291,3 +318,27 @@ class Secretary:
                     time_ext_req=extension
                 )
                 info["deadline"] += extension
+
+    # === Console logging ===
+
+    def _log_latency(self, duration_ms, frame):
+        """Internal diagnostic tool to detect module blocking."""
+        if not self.monitor_enabled:
+            return
+            
+        thresholds = [0.1, 0.25, 0.5, 1, 2, 4, 8]
+        triggered = [t for t in thresholds if duration_ms >= t]
+        
+        if triggered:
+            max_t = max(triggered)
+            level = "CRITICAL" if max_t >= 1000 else "WARNING"
+            
+            # Contextual info based on message type
+            ctx = f"Type: {frame.msg_type.name}"
+            if frame.evt_type: ctx += f", Evt: {frame.evt_type}"
+            if frame.cmd_type: ctx += f", Cmd: {frame.cmd_type}"
+            if frame.cmd_id:   ctx += f", ID: {frame.cmd_id}"
+            
+            print(f"[{level} > {max_t}ms] Module {self.address.name} BLOCKED Secretary! "
+                  f"Duration: {duration_ms:.1f}ms. Context: {ctx}. "
+                  f"Sender: {frame.sender.name}. Payload: {frame.payload}")
