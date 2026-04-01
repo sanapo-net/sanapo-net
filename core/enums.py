@@ -17,13 +17,27 @@ class MsgType(str, Enum):
 @unique
 class EvtType(str, Enum):
     """EventType for the shared bus"""
+    EVT_TEST = "evt_test"
     MSG = "msg"
     WRN = "wrn"
     ERR = "err"
     LOG = "log"
     BUS_IS_OVERCROWDED = "bus_is_overcrowded"
-    BUFFER_NEW_DATA = "buffer_new_data"
-    EVT_TEST = "evt_test"
+    ICMP_RAW_DATA_READY = "icmp_raw_data_ready"
+    ICMP_TICK_DATA_READY = "icmp_tick_data_ready"
+    ICMP_DB_DATA_READY = "icmp_db_data_ready"
+    ICMP_1M_DATA_READY = "icmp_1m_data_ready"
+    ICMP_3M_DATA_READY = "icmp_3m_data_ready"
+    ICMP_10M_DATA_READY = "icmp_10m_data_ready"
+    TICK_05 = "tick_05"
+    TICK_1 = "tick_1"
+    TICK_2 = "tick_2"
+    TICK_4 = "tick_4"
+    TICK_8 = "tick_8"
+    TICK_24 = "tick_24"
+    TICK_120 = "tick_120"
+    TICK_600 = "tick_600"
+
 
 @unique
 class CmdType(str, Enum):
@@ -37,7 +51,7 @@ class RptType(str, Enum):
     """CommandType for the shared bus"""
     DONE = "done"
     INTO_WORK = "into_work"
-    TIME_EXTENSION_REQUEST = "time_ext_req"
+    TIME_EXTENSION_REQUEST = "time_extension_request"
     CANT_DO = "cant_do"
 
 @unique
