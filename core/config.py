@@ -6,9 +6,16 @@ class Config():
     BUS_READ_LIMIT = 100
     CORE_TICK_RATE = 0.0025 # seconds
 
+    # For buffer
+    BUF_ICMP_SPARE_COLS_MAX = 150
+    BUF_ICMP_SPARE_COLS_TARGET = 100
+    BUF_ICMP_MIN_PER_SAMPLES_10M_DB = 40  # %
+    BUF_ICMP_MIN_PER_SAMPLES_10M = 40     # %
+    BUF_ICMP_MIN_PER_SAMPLES_3M = 70      # %
+    BUF_ICMP_MIN_PER_SAMPLES_1M = 90      # %
+    BUF_ICMP_MIN_PER_SAMPLES_DEFAULT = 90 # %
 
     # For the Secretary
-
     DEFAULT_CMD_DEADLINE_ANSW = 0.05    # seconds
     DEFAULT_CMD_DEADLINE_DONE = 0.8     # seconds
     DEFAULT_TIME_EXTENSION = 0.5        # seconds

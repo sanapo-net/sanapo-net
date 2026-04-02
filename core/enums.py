@@ -2,6 +2,26 @@
 # ToDo: in future all replacy as auto()
 from enum import Enum, unique
 
+
+class RollWin(int, Enum):
+    MIN_1  = 60
+    MIN_3  = 180 
+    MIN_10 = 600
+
+
+@unique
+class TickInterval(float, Enum):
+    """Physical time constants in seconds."""
+    SEC_05   = 0.5
+    SEC_1    = 1.0
+    SEC_2    = 2.0
+    SEC_4    = 4.0
+    SEC_8    = 8.0
+    SEC_24   = 24.0
+    SEC_120  = 120.0
+    SEC_600  = 600.0
+
+
 class Addr(str, Enum):
     KERNEL = "kernel"
     BUFFER = "buffer"
@@ -9,10 +29,12 @@ class Addr(str, Enum):
     NETWORK_DB = "network_db"
     ENGINE = "engine"
 
+
 class MsgType(str, Enum):
     COMMAND = "cmd"
     REPORT = "rpt"
     EVENT = "evt"
+
 
 @unique
 class EvtType(str, Enum):
@@ -22,6 +44,7 @@ class EvtType(str, Enum):
     WRN = "wrn"
     ERR = "err"
     LOG = "log"
+    ERR_LOGIC = "err_logic" # not users error
     BUS_IS_OVERCROWDED = "bus_is_overcrowded"
     ICMP_RAW_DATA_READY = "icmp_raw_data_ready"
     ICMP_TICK_DATA_READY = "icmp_tick_data_ready"
@@ -46,6 +69,7 @@ class CmdType(str, Enum):
     CANCEL_TASK = "cancel_task"
     CMD_TEST = "cmd_test"
 
+
 @unique
 class RptType(str, Enum):
     """CommandType for the shared bus"""
@@ -53,6 +77,7 @@ class RptType(str, Enum):
     INTO_WORK = "into_work"
     TIME_EXTENSION_REQUEST = "time_extension_request"
     CANT_DO = "cant_do"
+
 
 @unique
 class RptReason(str, Enum):
@@ -65,6 +90,7 @@ class RptReason(str, Enum):
     INVALID_ARGS = "INVALID_ARGS"       # Command payload is corrupted or invalid
     RESOURCE_LOCKED = "RESOURCE_LOCKED" # Hardware or file is busy
     INTERNAL_ERROR = "INTERNAL_ERROR"   # Unhandled exception in module
+
 
 class SanapoError(Exception): pass
 class AddressBusyError(SanapoError): pass

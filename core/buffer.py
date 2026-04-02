@@ -1,8 +1,10 @@
 # core/buffer_icmp.py
 import threading
 import numpy as np
+import time
 from contextlib import contextmanager
-from typing import Dict, List, Optional, Tuple, Any, Union
+from typing import Dict, List, Optional, Any
+
 from core import enums
 from core.protocol import Frame
 
@@ -11,45 +13,32 @@ class BufferICMP:
     High-performance ICMP metrics buffer using circular NumPy matrices.
     Handles real-time ingestion, multi-tier aggregation, and thread-safe access.
     """
-    
-    SPARE_COLS_MAX = 150
-    SPARE_COLS_TARGET = 100
-    
-    # 80% Quality Gate constants (Calculated for 8s max interval)
-    # (Window_sec / 0.5s_tick) / (8s_max_interval / 0.5s_tick) * 0.8
-    MIN_SAMPLES_3M = 18 
-    MIN_SAMPLES_10M = 60
 
     def __init__(self, kernel, tools):
         self.kernel = kernel
-        self.tools = tools  # Proxy to kernel.network and settings
-        self.secr = None    # Secretary instance (to be set after init)
+        self.tools = tools
+        self.secr = None # after init
         
-        # Concurrency primitives
+        self._spare_max = tools.config.BUF_ICMP_SPARE_COLS_MAX
+        self._spare_target = tools.config.BUF_ICMP_SPARE_COLS_TARGET
+        
+        # Validate configuration consistency
+        if self._spare_max <= self._spare_target:
+            err = f"Config Error: MAX ({self._spare_max}) <= TARGET ({self._spare_target})"
+            raise RuntimeError(err)
+
         self._lock = threading.RLock()
-        #self._cond_db = threading.Condition(self._lock) # For DB Manager synchronization
         
-        # Topology state
         self.network_ver = -1
-        self.uid_to_col: Dict[str, int] = {}
-        self.free_slots: List[int] = []
-        self.active_uids: List[str] = [] # The exact order for the Scanner
+        self._uid_to_col: Dict[str, int] = {}
+        self._free_slots: List[int] = []
+        self.active_uids: List[str] = [] 
         
-        # Time management
-        self.head_idx = 0  # Points to the "NOW" row in the matrix (0-1199)
+        self.head_idx = 0 
         
-        # Main storage: 1200 rows (10 min history @ 0.5s ticks)
-        # float16 is enough for RTT (ms) and supports NaN natively
-        self._matrix = np.full((1200, self.SPARE_COLS_TARGET), np.nan, dtype=np.float16)
+        self._matrix = np.full((1200, self._spare_target), np.nan, dtype=np.float16)
+        self._free_slots = list(range(self._spare_target - 1, -1, -1))
 
-    # --- EXTERNAL ACCESS ---
-
-    @contextmanager
-    def get_icmp_view(self):
-        """Thread-safe context manager for data readers."""
-        with self._lock:
-            # Returns references; the lock prevents Kernel from shifting/writing
-            yield self._matrix, self.head_idx, self.active_uids
 
     # --- DATA INGESTION & TICKING ---
 
@@ -90,7 +79,7 @@ class BufferICMP:
 
         with self._lock:
             # Map UIDs from scanner's order to matrix columns
-            target_cols = [self.uid_to_col[uid] for uid in self.active_uids]
+            target_cols = [self._uid_to_col[uid] for uid in self.active_uids]
             
             try:
                 # Fast vectorized assignment
@@ -99,60 +88,112 @@ class BufferICMP:
             except Exception as e:
                 print(f"[BufferICMP] Ingest failed: {e}")
 
+
     # --- NET TOPOLOGY & MEMORY ---
 
     def _sync_topology(self):
         """Updates matrix schema and mapping based on NetworkTopology."""
-        new_tab = self.tools.network_tab
-        new_uids_set = set(new_tab.keys())
-        curr_uids_set = set(self.uid_to_col.keys())
+        with self._lock:
+            new_tab = self.tools.network_tab
+            new_uids_set = set(new_tab.keys())
+            curr_uids_set = set(self._uid_to_col.keys())
 
-        # 1. Remove deleted: Wipe columns and free slots
-        for uid in (curr_uids_set - new_uids_set):
-            col = self.uid_to_col.pop(uid)
-            self._matrix[:, col] = np.nan # clean slot
-            self.free_slots.append(col)
+            # 1. Remove deleted: Wipe columns and free slots
+            for uid in (curr_uids_set - new_uids_set):
+                col = self._uid_to_col.pop(uid)
+                self._matrix[:, col] = np.nan # clean slot
+                self._free_slots.append(col)
 
-        # 2. Add new: Find or create slots
-        for uid in (new_uids_set - curr_uids_set):
-            if not self.free_slots:
-                self._expand_matrix()
-            col = self.free_slots.pop()
-            self.uid_to_col[uid] = col
+            # 2. Add new uids: Find free slots or create new slots
+            for uid in (new_uids_set - curr_uids_set):
+                if not self._free_slots:
+                    self._expand_matrix()
+                col = self._free_slots.pop()
+                self._uid_to_col[uid] = col
 
-        # 3. Finalize order
-        self.active_uids = list(new_tab.keys())
-        self.network_ver = self.tools.network_ver
-        self._check_resizing()
+            # 3. Finalize order
+            self.active_uids = list(new_tab.keys())
+            self.network_ver = self.tools.network_ver
+            if len(self._free_slots) > self.tools.config.BUF_ICMP_SPARE_COLS_MAX:
+                self._compact_matrix()
 
     def _expand_matrix(self):
         """Extends matrix width by 100 columns."""
-        ext = np.full((1200, 100), np.nan, dtype=np.float16)
-        old_w = self._matrix.shape[1]
-        self._matrix = np.hstack([self._matrix, ext])
-        self.free_slots.extend(range(old_w + 99, old_w - 1, -1))
+        with self._lock:
+            ext = np.full((1200, 100), np.nan, dtype=np.float16)
+            old_w = self._matrix.shape[1]
+            self._matrix = np.hstack([self._matrix, ext])
+            self._free_slots.extend(range(old_w + 99, old_w - 1, -1))
 
-    def _check_resizing(self):
-        """Shrinks matrix if free slots exceed SPARE_COLS_MAX."""
-        # TODO: make it
-        pass
+    def _compact_matrix(self):
+        """Smart partial compaction of the matrix to optimize memory usage."""
+        # Fast check without lock for better performance
+        if len(self._free_slots) <= self._spare_max:
+            return
+        
+        with self._lock:
+            # Memory Integrity Guard (Internal Invariant Check)
+            free_w = len(self._free_slots)
+            occupied_w = len(self._uid_to_col)
+            actual_w = self._matrix.shape[1]
+            target_w = occupied_w + self._spare_target
+            
+            if actual_w != (occupied_w + free_w):
+                # Critical bug: data/index mismatch. Reporting and aborting.
+                msg = f"Memory Invariant Violation! {actual_w} != {occupied_w} + {free_w}"
+                self._report_logic_err(msg)
+                return
+            
+            # Check if shrinking is physically necessary
+            if actual_w <= target_w:
+                return
+
+            # Evacuation: Identify active UIDs located in the 'Tail Zone'
+            uids_to_move = [uid for uid, col in self._uid_to_col.items() if col >= target_w]
+
+            if uids_to_move:
+                # Find available slots within the 'Safe Zone' (0 to target_w)
+                safe_slots = [s for s in self._free_slots if s < target_w]
+                
+                for uid in uids_to_move:
+                    if not safe_slots:
+                        # Resource saturation: no room to evacuate. Postponing.
+                        self._report_logic_err("Evacuation failed: No safe slots!")
+                        return 
+                    
+                    old_col = self._uid_to_col[uid]
+                    new_col = safe_slots.pop(0)
+                    
+                    # Physical data relocation (Column copy)
+                    self._matrix[:, new_col] = self._matrix[:, old_col]
+                    self._uid_to_col[uid] = new_col
+
+                    print(f"[BufferICMP] Evacuated {uid} from col {old_col} to {new_col}")
+
+            # Physical Truncation
+            self._matrix = self._matrix[:, :target_w]
+            
+            # Index Reconciliation
+            self._free_slots = [s for s in self._free_slots if s < target_w]
+            
+            print(f"[BufferICMP] Compaction success: {actual_w} -> {target_w}")
+
 
     # --- AGGREGATION ---
-    def get_window_metrics(self, seconds: int = 180) -> Dict[str, np.ndarray]:
+
+    def get_window_metrics(self, window: enums.RollWin) -> Dict[str, np.ndarray]:
         """
         Calculate metrics for rolling windows (1m, 3m, 10m).
         Distinguishes between Timeouts (-1) and No Data (NaN).
         """
-        rows_needed = int(seconds / 0.5)
-        
-        # Dynamic quality gate (80% of expected samples)
-        # TODO: Move to centralized settings/constants
-        if seconds <= 60:
-            min_samples = 96   # (60s / 0.5s) * 0.8
-        elif seconds <= 180:
-            min_samples = self.MIN_SAMPLES_3M
-        else:
-            min_samples = self.MIN_SAMPLES_10M
+        rows_needed = int(window / 0.5)
+        threshold_map = {
+            enums.RollWin.MIN_1:  self.tools.settings.BUF_ICMP_MIN_PER_SAMPLES_1M,
+            enums.RollWin.MIN_3:  self.tools.settings.BUF_ICMP_MIN_PER_SAMPLES_3M,
+            enums.RollWin.MIN_10: self.tools.settings.BUF_ICMP_MIN_PER_SAMPLES_10M
+        }
+        min_pct = threshold_map.get(window, self.tools.settings.BUF_ICMP_MIN_PER_SAMPLES_DEFAULT)
+        min_samples = int(rows_needed * (min_pct / 100))
 
         with self._lock:
             # Shift circular buffer to linear: past at the top, present at the bottom
@@ -166,54 +207,41 @@ class BufferICMP:
         calc_data = np.where(valid_mask, data, np.nan)
 
         with np.errstate(all='ignore'):
-            # 1. Base counts
             sample_counts = np.sum(valid_mask | timeout_mask, axis=0)
-            
-            # 2. Vectorized Streak Calculation
-            def _get_max_streak(m_2d):
-                # Vertical stack a False row to handle edge cases at the start
-                m = np.vstack([np.zeros(m_2d.shape[1], dtype=bool), m_2d])
-                idx = np.where(~m, 0, 1)
-                # Iterative prefix sum that resets on False (non-timeout) values
-                for i in range(1, idx.shape[0]):
-                    idx[i] *= (idx[i-1] + 1)
-                return np.max(idx, axis=0)
+            diffs = np.abs(np.diff(calc_data, axis=0)) # Jitter calculation
+            perc_values = np.nanpercentile(calc_data, [5, 25, 50, 75, 95], axis=0)
 
-            # 3. Jitter calculation (diff between adjacent successful RTTs)
-            diffs = np.abs(np.diff(calc_data, axis=0))
-
-            # 4. Primary Results Dictionary
             res = {
-                "avg":          np.nanmean(calc_data, axis=0),
+                "p5":           perc_values[0],
+                "p25":          perc_values[1],
+                "p50":          perc_values[2],
+                "p75":          perc_values[3],
+                "p95":          perc_values[4],
                 "min":          np.nanmin(calc_data, axis=0),
                 "max":          np.nanmax(calc_data, axis=0),
-                "median":       np.nanmedian(calc_data, axis=0),
-                "p95":          np.nanpercentile(calc_data, 95, axis=0),
-                "loss_count":   np.sum(timeout_mask, axis=0).astype(np.int32),
-                "loss_streak":  _get_max_streak(timeout_mask).astype(np.int32),
-                "samples":      sample_counts.astype(np.int32),
-                "delta_jitter": np.nanmean(diffs, axis=0)
+                "sum_rtt":      np.nansum(calc_data, axis=0),
+                "sq_sum":       np.nansum(np.square(calc_data), axis=0),
+                "sample":       sample_counts.astype(np.int32),
+                "loss_count":   np.sum(timeout_mask, axis=0, dtype=np.int32),
+                "loss_streak":  self._get_max_streak(timeout_mask).astype(np.int32),
+                "delta_jitter": np.nanmean(diffs, axis=0),
+                "avg":          np.nanmean(calc_data, axis=0),
             }
             
-            # 5. Stability Monitoring (CV): deviation from avg in percent
+            # Stability Monitoring (Coefficient of Variation, deviation from avg in percent)
             raw_cv = np.nanstd(calc_data, axis=0) / res["avg"]
-            # Handle Zero RTT Anomaly (Critical Alert)
+            
+            # Zero RTT Anomaly checking
             inf_mask = np.isinf(raw_cv)
             if np.any(inf_mask):
-                bad_indices = np.where(inf_mask)[0]
-                bad_uids = [self.active_uids[i] for i in bad_indices]
-                self.secr.send_evt(
-                    enums.EvtType.MODULE_HEALTH_CRITICAL,
-                    payload={
-                        "reason": "ZERO_RTT_DETECTED",
-                        "uids": bad_uids,
-                        "msg": "Data corruption or scanner failure: RTT is zero."
-                    }
-                )
+                bad_uids = [self.active_uids[i] for i in np.where(inf_mask)[0]]
+                msg = f"Data corruption or scanner failure: RTT is zero. bad_uids: {bad_uids}"
+                self._report_logic_err(msg)
+
             # Clean up CV: replace Inf/NaN with proper NaN
             res["cv"] = np.where(np.isfinite(raw_cv), raw_cv, np.nan)
 
-            # 6. Quality Gate: Nullify columns with insufficient data density
+            # Quality Gate: if sample_counts < min_samples -> NaN
             quality_mask = sample_counts < min_samples
             for key in res:
                 if isinstance(res[key], np.ndarray):
@@ -238,30 +266,78 @@ class BufferICMP:
         # Data preparation (Ignore -1 and NaN for mathematical stats)
         calc_data = np.where(valid_mask, data, np.nan)
 
+        # Returns a 2D array [5, N_devices]
+        perc_values = np.nanpercentile(calc_data, [5, 25, 50, 75, 95], axis=0)
+        
         with np.errstate(all='ignore'):
             return {
-                "sent":    np.sum(valid_mask | timeout_mask, axis=0, dtype=np.int32),
-                "lost":    np.sum(timeout_mask, axis=0, dtype=np.int32),
-                "sum_rtt": np.nansum(calc_data, axis=0),
-                "sq_sum":  np.nansum(np.square(calc_data), axis=0),
-                "min":     np.nanmin(calc_data, axis=0),
-                "max":     np.nanmax(calc_data, axis=0),
-                # --- Boxplot metrics ---
-                "p5":     np.nanpercentile(calc_data, 5, axis=0),
-                "q25":     np.nanpercentile(calc_data, 25, axis=0),
-                "q50":     np.nanmedian(calc_data, axis=0), # Equal to Q50
-                "q75":     np.nanpercentile(calc_data, 75, axis=0),
-                "p95":     np.nanpercentile(calc_data, 95, axis=0)
+                "p5":        perc_values[0],
+                "p25":       perc_values[1],
+                "p50":       perc_values[2],
+                "p75":       perc_values[3],
+                "p95":       perc_values[4],
+                "min":       np.nanmin(calc_data, axis=0),
+                "max":       np.nanmax(calc_data, axis=0),
+                "sum_rtt":   np.nansum(calc_data, axis=0),
+                "sq_sum":    np.nansum(np.square(calc_data), axis=0),
+                "sample":    np.sum(valid_mask | timeout_mask, axis=0, dtype=np.int32),
+                "loss_count":np.sum(timeout_mask, axis=0, dtype=np.int32),
+            }
+        
+    def get_raw_staging_data(self) -> Dict[str, Any]:
+        """
+        Prepares a 10-minute raw data package for the DB Staging Area.
+        Returns a dict with binary matrix, UID mapping, and start timestamp.
+        """
+        with self._lock:
+            # Reorder so the oldest row is first, newest is last
+            linear_matrix = np.roll(self._matrix, shift=-(self.head_idx + 1), axis=0)
+            # Time of starting this 10-minute time-pie
+            start_time = time.time() - 600
+            
+            return {
+                "start_ts": start_time,
+                "net_ver":  self.network_ver,
+                "uids":     list(self.active_uids),
+                "blob":     linear_matrix.tobytes() 
             }
 
 
-    # --- OPTION A: WAIT INTERFACE FOR DB MANAGER ---
+    # --- OTHER ---
     
-    def wait_for_db_cycle(self, timeout: float = 615.0):
+    def wait_for_db_cycle(self, timeout: Optional[float] = None):
         """
         Blocks the calling thread until the 10-minute aggregation is ready.
         Must be called from a dedicated DB Manager thread.
         """
+        if timeout is None:
+            timeout = enums.TickInterval.SEC_600 * 1.2
         with self._lock:
             # Returns True if notified, False if timed out
             return self._cond_db.wait(timeout=timeout)
+        
+    def _report_logic_err(self, msg: str):
+        """Sends a critical logic error event to the shared bus for alerting."""
+        print(f"[BUFFER_LOGIC_ERR] {msg}")
+        if self.secr:
+            self.secr.send_evt(
+                enums.EvtType.ERR_LOGIC,
+                payload={"text": msg}
+            )
+
+    # Returns True if notified, False if timed out
+    @contextmanager
+    def get_icmp_view(self):
+        """Thread-safe context manager for data readers."""
+        with self._lock:
+            # Returns references; the lock prevents Kernel from shifting/writing
+            yield self._matrix, self.head_idx, self.active_uids
+
+    def _get_max_streak(m_2d):
+        # Vertical stack a False row to handle edge cases at the start
+        m = np.vstack([np.zeros(m_2d.shape[1], dtype=bool), m_2d])
+        idx = np.where(~m, 0, 1)
+        # Iterative prefix sum that resets on False (non-timeout) values
+        for i in range(1, idx.shape[0]):
+            idx[i] *= (idx[i-1] + 1)
+        return np.max(idx, axis=0)
