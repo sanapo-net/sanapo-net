@@ -15,6 +15,9 @@ class Config():
     BUF_ICMP_MIN_PER_SAMPLES_1M = 90      # %
     BUF_ICMP_MIN_PER_SAMPLES_DEFAULT = 90 # %
 
+    # For scanner
+    SCAN_ICMP_TIMEOUT_MARGIN = 0.1 # seconds
+
     # For the Secretary
     DEFAULT_CMD_DEADLINE_ANSW = 0.05    # seconds
     DEFAULT_CMD_DEADLINE_DONE = 0.8     # seconds

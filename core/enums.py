@@ -1,5 +1,4 @@
 # core/enums.py
-# ToDo: in future all replacy as auto()
 from enum import Enum, unique
 
 
@@ -12,6 +11,7 @@ class RollWin(int, Enum):
 @unique
 class TickInterval(float, Enum):
     """Physical time constants in seconds."""
+    OFF      = -1
     SEC_05   = 0.5
     SEC_1    = 1.0
     SEC_2    = 2.0
