@@ -25,8 +25,8 @@ class Config():
     DEADLINE_EXTENSION_THRESHOLD = 0.3  # seconds
     SECRETARY_TICK_RATE_DEFAULT = 0.025 # seconds
     MODULE_TICK_SLA = {
-        "ENGINE": 0.005,  #  for jast remember and example
-        "GUI": 0.016,     #  for jast remember and example
+        "KERNEL": 0.002,
+        "BUFFER_ICMP": 0.0045,
     }
     # SLA Registry for specific commands (Contractual timeouts)
     CMD_SLA = {

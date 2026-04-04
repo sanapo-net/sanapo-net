@@ -1,19 +1,23 @@
-# core/settings/icmp.py
+# core/settings/settings_icmp.py
 from core.enums import TickInterval
-from core.config import SCAN_ICMP_TIMEOUT_MARGIN 
 
-class IcmpPolicy:
-    def __init__(self):
+class SettingsICMP:
+    def __init__(self, proxy_obj):
+        self.timeout_margin = proxy_obj.config.SCAN_ICMP_TIMEOUT_MARGIN
         # Default state
-        self._defaults = {
+        self._default_intervals = {
             "high": TickInterval.SEC_1,
             "mid":  TickInterval.SEC_2,
             "low":  TickInterval.SEC_4
         }
-        
-        self._interval_high = self._defaults["high"]
-        self._interval_medium = self._defaults["mid"]
-        self._interval_low = self._defaults["low"]
+        self._user_intervals = {
+            "high": TickInterval.SEC_1,
+            "mid":  TickInterval.SEC_2,
+            "low":  TickInterval.SEC_4
+        }
+        self._interval_high = self._user_intervals["high"]
+        self._interval_medium = self._user_intervals["mid"]
+        self._interval_low = self._user_intervals["low"]
         
         self._base_timeout = 0.4
         self._timeout_high = 0.4
@@ -21,22 +25,20 @@ class IcmpPolicy:
         self._timeout_low = 0.4
         self._update_all_timeouts()
 
-    # TODO SCAN_ICMP_TIMEOUT_MARGIN is not in core.config, it in class Config
+    # TODO self.timeout_margin is not in core.config, it in class Config
     def _calculate_clamped_timeout(self, interval: TickInterval) -> float:
         """Ensures timeout never exceeds interval minus safety margin."""
         if interval == TickInterval.OFF:
             return self._base_timeout
         # Interval must be larger than margin
-        limit = max(0.1, interval.value - SCAN_ICMP_TIMEOUT_MARGIN)
+        limit = max(0.1, interval.value - self.timeout_margin)
         return min(self._base_timeout, limit)
-
 
     def _update_all_timeouts(self):
         """Recalculate all tiers based on new base timeout or intervals"""
         self._timeout_high = self._calculate_clamped_timeout(self._interval_high)
         self._timeout_medium = self._calculate_clamped_timeout(self._interval_medium)
         self._timeout_low = self._calculate_clamped_timeout(self._interval_low)
-
 
     def _shift_interval(self, current: TickInterval, step: int) -> TickInterval:
         """Navigates through TickInterval enum, respecting OFF and SEC_8 boundaries."""
@@ -52,29 +54,32 @@ class IcmpPolicy:
             # If current was already > 8s, clamp it to 8s
             return TickInterval.SEC_8
 
-
-    def boost(self):
+    def boost_speed(self):
         """Speeds up all active tiers"""
         self._interval_high = self._shift_interval(self._interval_high, -1)
         self._interval_medium = self._shift_interval(self._interval_medium, -1)
         self._interval_low = self._shift_interval(self._interval_low, -1)
         self._update_all_timeouts()
 
-
-    def relax(self):
+    def relax_speed(self):
         """Slows down all active tiers"""
         self._interval_high = self._shift_interval(self._interval_high, 1)
         self._interval_medium = self._shift_interval(self._interval_medium, 1)
         self._interval_low = self._shift_interval(self._interval_low, 1)
         self._update_all_timeouts()
 
+    def normal_speed(self):
+        """Restores former speed"""
+        self._interval_high = self._user_intervals["high"]
+        self._interval_medium = self._user_intervals["mid"]
+        self._interval_low = self._user_intervals["low"]
+        self._update_all_timeouts()
 
-    # TODO not from _defaults, from memory
-    def reset_to_defaults(self):
+    def reset_speed(self):
         """Restores baseline speed"""
-        self._interval_high = self._defaults["high"]
-        self._interval_medium = self._defaults["mid"]
-        self._interval_low = self._defaults["low"]
+        self._interval_high = self._default_intervals["high"]
+        self._interval_medium = self._default_intervals["mid"]
+        self._interval_low = self._default_intervals["low"]
         self._update_all_timeouts()
 
     # --- Properties with logic validation ---

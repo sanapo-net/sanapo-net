@@ -6,12 +6,13 @@ from queue import Queue, Empty
 import time
 
 from core.enums import Addr, MsgType, CmdType, EvtType, AddressBusyError, UnknownRecipientError
-from core.buffer import Buffer
 from core.config import Config
+from core.buffer import BufferManager
+from core.settings import SettingsManager
 from network.network import Network
 from core.protocol import Frame
 
-# ToDo: add new property form Network and Buffer
+# TODO: add new property form Network and Buffer
 @dataclass(frozen=True)
 class ModuleTools:
     """Data proxy object for modules. For Principle of Least Privilege"""
@@ -25,13 +26,13 @@ class ModuleTools:
 class Kernel:
     def __init__(self):
         self.config = Config()
-        self.buffer = Buffer()
+        self.buffer = BufferManager()
         self.network = Network()
         self.bus = Queue() 
         self.registry = {} # modele queues {Addr: Queue, ...}
         self.is_running = True
 
-    # ToDo: give property by Principle of Least Privilege (PoLP)
+    # TODO: give property by Principle of Least Privilege (PoLP)
     def get_tools(self, addr: Addr) -> ModuleTools:
         """Register the data-proxy object and provide it to the module."""
         if not isinstance(addr, Addr):
@@ -49,7 +50,7 @@ class Kernel:
             network_tab=self.network.network_tab
         )
     
-    # ToDo: missing recipient
+    # TODO: missing recipient
     def route_messages(self):
         """
         Main mail sorter (Main Thread).
@@ -84,7 +85,7 @@ class Kernel:
                     break
 
                 # If metrics: push to buffer immediately
-                # ToDo: this needs refactoring
+                # TODO: this needs refactoring
                 if frame.msg_type == MsgType.DATA:
                     self.buffer.update(frame.payload)
 

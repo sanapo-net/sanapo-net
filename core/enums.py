@@ -24,10 +24,15 @@ class TickInterval(float, Enum):
 
 class Addr(str, Enum):
     KERNEL = "kernel"
-    BUFFER = "buffer"
-    NETWORK = "network"
-    NETWORK_DB = "network_db"
-    ENGINE = "engine"
+    BUFFER_ICMP = "buffer_icmp"
+    BUFFER_TCP = "buffer_tcp"
+    BUFFER_DISCOVERY = "buffer_discovery"
+    SETTINGS_ICMP = "settings_icmp"
+    SETTINGS_PORTS = "settings_ports"
+    SETTINGS_SNIFFER = "settings_sniffer"
+    SETTINGS_GATE = "settings_gate"
+    SETTINGS_UI = "settings_ui"
+    SETTINGS_DB = "settings_db"
 
 
 class MsgType(str, Enum):
@@ -46,12 +51,13 @@ class EvtType(str, Enum):
     LOG = "log"
     ERR_LOGIC = "err_logic" # not users error
     BUS_IS_OVERCROWDED = "bus_is_overcrowded"
-    ICMP_RAW_DATA_READY = "icmp_raw_data_ready"
-    ICMP_TICK_DATA_READY = "icmp_tick_data_ready"
-    ICMP_DB_DATA_READY = "icmp_db_data_ready"
-    ICMP_1M_DATA_READY = "icmp_1m_data_ready"
-    ICMP_3M_DATA_READY = "icmp_3m_data_ready"
-    ICMP_10M_DATA_READY = "icmp_10m_data_ready"
+    ICMP_RAW_READY = "icmp_raw_ready"
+    ICMP_TICK_READY = "icmp_tick_ready"
+    ICMP_AGR_WIN_1M_READY = "icmp_agr_win_1m_ready"
+    ICMP_AGR_WIN_3M_READY = "icmp_agr_win_3m_ready"
+    ICMP_AGR_WIN_10M_READY = "icmp_agr_win_10m_ready"
+    ICMP_AGR_DB_10M_READY = "icmp_agr_db_10m_ready"
+    ICMP_RAW_DB_10M_READY = "icmp_raw_db_10m_ready"
     TICK_05 = "tick_05"
     TICK_1 = "tick_1"
     TICK_2 = "tick_2"
@@ -59,7 +65,8 @@ class EvtType(str, Enum):
     TICK_8 = "tick_8"
     TICK_24 = "tick_24"
     TICK_120 = "tick_120"
-    TICK_600 = "tick_600"
+    TICK_10M = "tick_10m" # every calendar 10min (system time)
+    NETWORK_NEW_VER = "network_new_ver"
 
 
 @unique
