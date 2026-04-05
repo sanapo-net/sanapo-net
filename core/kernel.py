@@ -9,25 +9,63 @@ from core.protocol import Frame
 from core.secretary import Secretary
 
 class Kernel:
-    def __init__(self, tools):
-        self.tools = tools
-        self.bus = Queue() 
-        self.registry: dict[Addr, Queue] = {}
+    def __init__(self, _tools):
+        self._tools = _tools
+        self._bus = Queue() 
+        self._registry: dict[Addr, Queue] = {}
         self._subscribers_evt: dict[EvtType, set[Addr]] = {}
         self._subscribers_cmd: dict[CmdType, set[Addr]] = {}
         #self._subscribers_rpt: dict[RptType, set[Addr]] = {}
-        self.is_running = True
+        self._is_running = True
+        self._tick_counter = 0
+        self._ticks_lookup = (
+            (240, EvtType.TICK_120),
+            (48,  EvtType.TICK_24),
+            (16,  EvtType.TICK_8),
+            (8,   EvtType.TICK_4),
+            (4,   EvtType.TICK_2),
+            (2,   EvtType.TICK_1),
+        )
+        
+
+    def _check_and_run_ticker(self):
+        now = time.time()
+        if now >= self._next_tick_time:
+            self._ticker()
+            self._next_tick_time = now + 0.5 
+
+
+    def _ticker(self):
+        """Heartbeat generator. RTT-ticks always go BEFORE Calendar-ticks."""
+        self._tick_counter += 1
+        payload = {"tick_id": self._tick_counter}
+        sent_rtt = False
+
+        # Find the "biggest" tick
+        for steps, evt_type in self._ticks_lookup:
+            if self._tick_counter % steps == 0:
+                self._send_evt(evt_type, payload)
+                sent_rtt = True
+                break
+
+        # or just tick 0.5
+        if not sent_rtt:
+            self._send_evt(EvtType.TICK_05, payload)
+        now_10m = (int(time.time()) // 600) * 600
+        if now_10m > self._last_10m_ts:
+            self._last_10m_ts = now_10m
+            self._send_evt(EvtType.TICK_10M, {"time": now_10m})
 
 
     def get_secr(self, addr: Addr) -> Secretary:
         if not isinstance(addr, Addr):
             raise UnknownAddressError(f"Address '{addr}' is not defined in Addr enum.")
-        if addr in self.registry:
+        if addr in self._registry:
             raise AddressBusyError(f"Address '{addr}' is already registered by another module.")
-        config = self.tools.config
-        outbox = self.bus
+        config = self._tools.config
+        outbox = self._bus
         inbox = Queue()
-        self.registry[addr] = inbox
+        self._registry[addr] = inbox
         return Secretary(addr, outbox, inbox, config)
     
 
@@ -38,7 +76,7 @@ class Kernel:
             for listeners in sub_dict.values():
                 listeners.discard(addr)
         # Delete Queue of module by addr
-        self.registry.pop(addr, None)
+        self._registry.pop(addr, None)
         # Send event
         self._send_evt(EvtType.EVT_ADDR_DEREGISTER, {"addr":addr})
 
@@ -86,22 +124,22 @@ class Kernel:
     def route_messages(self):
         """
         Main mail sorter (Main Thread).
-        Processes the incoming bus and distributes messages to module inboxes.
+        Processes the incoming _bus and distributes messages to module inboxes.
         """
         now = time.perf_counter()
-        q_size = self.bus.qsize()
+        q_size = self._bus.qsize()
 
-        # Overcrowd checking. Once every 1 second send event if the bus is overcrowded.
+        # Overcrowd checking. Once every 1 second send event if the _bus is overcrowded.
         if q_size > self.config.BUS_READ_LIMIT:
             if now - self._last_overcrowded_alert > 1.0:
-                self._send_evt(EvtType.BUS_IS_OVERCROWDED, {"text":f"Current bus size: {q_size}"})
+                self._send_evt(EvtType.BUS_IS_OVERCROWDED, {"text":f"Current _bus size: {q_size}"})
                 self._last_overcrowded_alert = now
 
         # Message parsing cycle
         processed_count = 0
         try:
-            while not self.bus.empty() and processed_count < self.config.BUS_READ_LIMIT:
-                frame = self.bus.get_nowait()
+            while not self._bus.empty() and processed_count < self.config.BUS_READ_LIMIT:
+                frame = self._bus.get_nowait()
                 processed_count += 1
 
                 # SYSTEM message
@@ -115,7 +153,7 @@ class Kernel:
                 # COMMAND message
                 elif frame.msg_type == MsgType.COMMAND:
                     dest = frame.recipient
-                    if dest in self.registry:
+                    if dest in self._registry:
                         # Find address-set in the dict of cmd subscribers
                         allowed_handlers = self._subscribers_cmd.get(frame.cmd_type, set())
                         if dest not in allowed_handlers:
@@ -124,7 +162,7 @@ class Kernel:
                             self._send_rpt(frame, RptType.NO_SUBSCRIBED_EXECUTOR)
                             break
                         # Executor exists and is subscribed - > send cmd
-                        self.registry[dest].put_nowait(frame)
+                        self._registry[dest].put_nowait(frame)
                     else:
                         # NO_REGISTRED_EXECUTOR
                         self._send_rpt(frame, RptType.NO_REGISTRED_EXECUTOR)
@@ -133,8 +171,8 @@ class Kernel:
                 # REPORTS message
                 elif frame.msg_type == MsgType.REPORT:
                     dest = frame.recipient
-                    if dest in self.registry:
-                        self.registry[dest].put_nowait(frame)
+                    if dest in self._registry:
+                        self._registry[dest].put_nowait(frame)
 
                 # EVENT message
                 elif frame.msg_type == MsgType.EVENT:
@@ -142,8 +180,8 @@ class Kernel:
                     subscribers = self._subscribers_evt.get(frame.evt_type, set())
                     for addr in subscribers:
                         # Dont send event to autor
-                        if addr != frame.sender and addr in self.registry:
-                            self.registry[addr].put_nowait(frame)
+                        if addr != frame.sender and addr in self._registry:
+                            self._registry[addr].put_nowait(frame)
         except Empty:
             pass
         except Exception as e:
@@ -152,7 +190,7 @@ class Kernel:
 
     def _send_evt(self, type: EvtType, payload: dict):
         frame=Frame(MsgType.EVENT, Addr.KERNEL, evt_type=type, payload=payload)
-        self.bus.put_nowait(frame)
+        self._bus.put_nowait(frame)
 
 
     def _send_rpt(self, cmd:Frame, type:RptType, payload:dict):
@@ -162,7 +200,7 @@ class Kernel:
         text += f"SubType: {cmd.cmd_type or cmd.rpt_type or 'None'} cmd_id: {cmd_id}"
         p = {"text":text}
         rpt = Frame(MsgType.REPORT, Addr.KERNEL, rpt_type=type, cmd_id=cmd_id, payload=p)
-        self.bus.put_nowait(rpt)
+        self._bus.put_nowait(rpt)
 
 
     def _shutdown_initialization(self):
@@ -172,13 +210,14 @@ class Kernel:
 
     def stop(self):
         print("[Kernel] Shutdown initiated...")
-        self.is_running = False
+        self._is_running = False
 
 
-    async def start(self):
+    async def launch(self):
         """core starter"""
         print("[Kernel] Running...")
-        while self.is_running:
+        while self._is_running:
             self.route_messages()
+            self._check_and_run_ticker()
             await asyncio.sleep(self.config.CORE_TICK_RATE)
         print("[Kernel] Halted.")

@@ -19,7 +19,6 @@ class TickInterval(float, Enum):
     SEC_8    = 8.0
     SEC_24   = 24.0
     SEC_120  = 120.0
-    SEC_600  = 600.0
 
 
 class Addr(str, Enum):
