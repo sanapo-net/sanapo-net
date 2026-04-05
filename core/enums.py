@@ -35,29 +35,29 @@ class Addr(str, Enum):
     SETTINGS_DB = "settings_db"
 
 
+@unique
 class MsgType(str, Enum):
     COMMAND = "cmd"
     REPORT = "rpt"
     EVENT = "evt"
+    SYSTEM = "system"
 
 
 @unique
 class EvtType(str, Enum):
     """EventType for the shared bus"""
+    # Common
     EVT_TEST = "evt_test"
     MSG = "msg"
     WRN = "wrn"
     ERR = "err"
     LOG = "log"
     ERR_LOGIC = "err_logic" # not users error
+    # Kernel
+    EVT_ADDR_DEREGISTER = "evt_addr_deregister"
     BUS_IS_OVERCROWDED = "bus_is_overcrowded"
-    ICMP_RAW_READY = "icmp_raw_ready"
-    ICMP_TICK_READY = "icmp_tick_ready"
-    ICMP_AGR_WIN_1M_READY = "icmp_agr_win_1m_ready"
-    ICMP_AGR_WIN_3M_READY = "icmp_agr_win_3m_ready"
-    ICMP_AGR_WIN_10M_READY = "icmp_agr_win_10m_ready"
-    ICMP_AGR_DB_10M_READY = "icmp_agr_db_10m_ready"
-    ICMP_RAW_DB_10M_READY = "icmp_raw_db_10m_ready"
+    ERR_ADDR_UNKNOWN = "err_addr_unknown"
+    NO_SUBSCRIBED_LESTENER = "no_subscribed_lestener"
     TICK_05 = "tick_05"
     TICK_1 = "tick_1"
     TICK_2 = "tick_2"
@@ -66,6 +66,16 @@ class EvtType(str, Enum):
     TICK_24 = "tick_24"
     TICK_120 = "tick_120"
     TICK_10M = "tick_10m" # every calendar 10min (system time)
+    # ScanICMP
+    ICMP_RAW_READY = "icmp_raw_ready"
+    # BufferICMP
+    ICMP_TICK_READY = "icmp_tick_ready"
+    ICMP_AGR_WIN_1M_READY = "icmp_agr_win_1m_ready"
+    ICMP_AGR_WIN_3M_READY = "icmp_agr_win_3m_ready"
+    ICMP_AGR_WIN_10M_READY = "icmp_agr_win_10m_ready"
+    ICMP_AGR_DB_10M_READY = "icmp_agr_db_10m_ready"
+    ICMP_RAW_DB_10M_READY = "icmp_raw_db_10m_ready"
+    # Network
     NETWORK_NEW_VER = "network_new_ver"
 
 
@@ -79,11 +89,26 @@ class CmdType(str, Enum):
 
 @unique
 class RptType(str, Enum):
-    """CommandType for the shared bus"""
+    """ReportType for the shared bus"""
     DONE = "done"
     INTO_WORK = "into_work"
     TIME_EXTENSION_REQUEST = "time_extension_request"
     CANT_DO = "cant_do"
+    NO_REGISTRED_EXECUTOR = "executor_missing"
+    NO_SUBSCRIBED_EXECUTOR = "no_subscribed_executor"
+
+
+@unique
+class SysType(str, Enum):
+    """SystemType for the shared bus"""
+    APP_STOP = "app_stop"
+    SUB_EVT = "sub_evt"
+    SUB_CMD = "sub_cmd"
+    UNSUB_EVT = "unsub_evt"
+    UNSUB_CMD = "unsub_cmd"
+    SUB_EVT_SETUP = "sub_evt_setup"
+    SUB_CMD_SETUP = "sub_cmd_setup"
+    SYS_ADDR_DEREGISTER  = "sys_addr_deregister"
 
 
 @unique
@@ -106,4 +131,5 @@ class MessageInitError(SanapoError): pass
 class UnknownCmdError(SanapoError): pass
 class UnknownEvtError(SanapoError): pass
 class UnknownRptError(SanapoError): pass
+class UnknownAddressError(SanapoError): pass
 class UnknownRecipientError(SanapoError): pass

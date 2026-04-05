@@ -1,6 +1,6 @@
 # core/protocol.py
 from dataclasses import dataclass
-from typing import Optional, Any, Union
+from typing import Optional, Any
 from core.enums import MsgType, Addr, RptType, MessageInitError
 
 @dataclass(frozen=True)
@@ -11,8 +11,10 @@ class Frame:
     The 'frozen=True' parameter makes the instance immutable,
     preventing accidental data modification during dispatching.
     """
+    # TODO add EvtType, CmdType, RptType, SysType
     msg_type: MsgType
     sender: Addr
+    sys_type: Optional[str] = None
     evt_type: Optional[str] = None
     cmd_type: Optional[str] = None
     rpt_type: Optional[str] = None
@@ -21,7 +23,7 @@ class Frame:
     deadline: Optional[float] = None
     time_ext_req: Optional[float] = None
     reason: Optional[str] = None
-    payload: Any = None
+    payload: Any = None # : dict
 
     def __post_init__(self):
         if not isinstance(self.msg_type, MsgType):

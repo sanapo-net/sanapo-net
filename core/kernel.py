@@ -1,56 +1,88 @@
 # core/kernel.py
 import asyncio
-from dataclasses import dataclass
-from typing import Callable, Any
 from queue import Queue, Empty
 import time
 
-from core.enums import Addr, MsgType, CmdType, EvtType, AddressBusyError, UnknownRecipientError
-from core.config import Config
-from core.buffer import BufferManager
-from core.settings import SettingsManager
-from network.network import Network
+from core.enums import Addr, MsgType, CmdType, EvtType, RptType, SysType
+from core.enums import AddressBusyError, UnknownAddressError
 from core.protocol import Frame
-
-# TODO: add new property form Network and Buffer
-@dataclass(frozen=True)
-class ModuleTools:
-    """Data proxy object for modules. For Principle of Least Privilege"""
-    inbox: Queue          # Incoming messages for the module to process
-    outbox: Queue         # Outgoing messages from the module to the bus
-    config: Any           # Global configuration settings
-    get_metrics: Callable # Method to retrieve a buffer snapshot
-    network_ver: int      # Version of network for change checking
-    network_tab: dict     # Dict of net interfaces into network
+from core.secretary import Secretary
 
 class Kernel:
-    def __init__(self):
-        self.config = Config()
-        self.buffer = BufferManager()
-        self.network = Network()
+    def __init__(self, tools):
+        self.tools = tools
         self.bus = Queue() 
-        self.registry = {} # modele queues {Addr: Queue, ...}
+        self.registry: dict[Addr, Queue] = {}
+        self._subscribers_evt: dict[EvtType, set[Addr]] = {}
+        self._subscribers_cmd: dict[CmdType, set[Addr]] = {}
+        #self._subscribers_rpt: dict[RptType, set[Addr]] = {}
         self.is_running = True
 
-    # TODO: give property by Principle of Least Privilege (PoLP)
-    def get_tools(self, addr: Addr) -> ModuleTools:
-        """Register the data-proxy object and provide it to the module."""
+
+    def get_secr(self, addr: Addr) -> Secretary:
         if not isinstance(addr, Addr):
-            raise UnknownRecipientError(f"Address '{addr}' is not defined in Addr enum.")
+            raise UnknownAddressError(f"Address '{addr}' is not defined in Addr enum.")
         if addr in self.registry:
             raise AddressBusyError(f"Address '{addr}' is already registered by another module.")
+        config = self.tools.config
+        outbox = self.bus
         inbox = Queue()
         self.registry[addr] = inbox
-        return ModuleTools(
-            inbox=inbox,
-            outbox=self.bus,
-            config=self.config,
-            get_metrics=lambda: self.buffer.snapshot,
-            network_ver=self.network.network_ver,
-            network_tab=self.network.network_tab
-        )
+        return Secretary(addr, outbox, inbox, config)
     
-    # TODO: missing recipient
+
+    def _addr_deregister(self, addr: Addr):
+        """Final cleanup: wipes the address from all registries and subscriptions."""
+        # Delete addr from subscribers
+        for sub_dict in [self._subscribers_evt, self._subscribers_cmd]:
+            for listeners in sub_dict.values():
+                listeners.discard(addr)
+        # Delete Queue of module by addr
+        self.registry.pop(addr, None)
+        # Send event
+        self._send_evt(EvtType.EVT_ADDR_DEREGISTER, {"addr":addr})
+
+
+    def _system_msg_handler(self, frame):
+        """Universal handler for all subscriptions and deregistrations."""
+        if sys_type == SysType.SYS_ADDR_DEREGISTER:
+            return self._addr_deregister(frame.sender)
+        
+        addr = frame.sender
+        sys_type = frame.sys_type
+        if isinstance(frame.payload, list):
+            msg_sub_types = frame.payload
+        else:
+            text = f"SysType.{sys_type}: payload is wrong. payload: {frame.payload}"
+            self._send_evt(EvtType.ERR_LOGIC, {"text":text})
+
+        # Mapping system types to internal subscriber dictionaries
+        target_map = {
+            SysType.SUB_EVT: (self._subscribers_evt, "add"),
+            SysType.UNSUB_EVT: (self._subscribers_evt, "discard"),
+            SysType.SUB_EVT_SETUP: (self._subscribers_evt, "setup"),
+            
+            SysType.SUB_CMD: (self._subscribers_cmd, "add"),
+            SysType.UNSUB_CMD: (self._subscribers_cmd, "discard"),
+            SysType.SUB_CMD_SETUP: (self._subscribers_cmd, "setup"),
+        }
+
+        if sys_type in target_map:
+            sub_dict, action = target_map[sys_type]
+            
+            # if SETUP — del address from everyone msg_sub_types
+            if action == "setup":
+                for s in sub_dict.values(): s.discard(addr)
+                action = "add" # after just add adress to target msg_sub_types
+
+            # Appy action (add or discard) to everyone msg_sub_type from payload
+            for msg_sub_type in msg_sub_types:
+                if action == "add":
+                    sub_dict.setdefault(msg_sub_type, set()).add(addr)
+                else:
+                    sub_dict.get(msg_sub_type, set()).discard(addr)
+    
+
     def route_messages(self):
         """
         Main mail sorter (Main Thread).
@@ -59,59 +91,91 @@ class Kernel:
         now = time.perf_counter()
         q_size = self.bus.qsize()
 
-        # 1. Backpressure protection - once every 1 second
+        # Overcrowd checking. Once every 1 second send event if the bus is overcrowded.
         if q_size > self.config.BUS_READ_LIMIT:
             if now - self._last_overcrowded_alert > 1.0:
-                alert_frame=Frame(
-                    msg_type=MsgType.EVENT,
-                    sender=Addr.KERNEL,
-                    evt_type=EvtType.BUS_IS_OVERCROWDED,
-                    payload=f"Current bus size: {q_size}"
-                )
-                self.bus.put_nowait(alert_frame)
+                self._send_evt(EvtType.BUS_IS_OVERCROWDED, {"text":f"Current bus size: {q_size}"})
                 self._last_overcrowded_alert = now
-                print(f"[WARNING] Bus overcrowded! Size: {q_size}")
 
-        # 2. Message parsing cycle
+        # Message parsing cycle
         processed_count = 0
         try:
             while not self.bus.empty() and processed_count < self.config.BUS_READ_LIMIT:
                 frame = self.bus.get_nowait()
                 processed_count += 1
 
-                # If it is a stop command
-                if frame.cmd_type == CmdType.APP_STOP:
-                    self.stop(frame)
+                # SYSTEM message
+                if frame.msg_type == MsgType.SYSTEM:
+                    if frame.sys_type == SysType.APP_STOP:
+                        self._shutdown_initialization()
+                    else:
+                        self._system_msg_handler(frame)
                     break
 
-                # If metrics: push to buffer immediately
-                # TODO: this needs refactoring
-                if frame.msg_type == MsgType.DATA:
-                    self.buffer.update(frame.payload)
+                # COMMAND message
+                elif frame.msg_type == MsgType.COMMAND:
+                    dest = frame.recipient
+                    if dest in self.registry:
+                        # Find address-set in the dict of cmd subscribers
+                        allowed_handlers = self._subscribers_cmd.get(frame.cmd_type, set())
+                        if dest not in allowed_handlers:
+                            # Executor exists, but it not subscribed for this CmdType
+                            # NO_SUBSCRIBED_EXECUTOR
+                            self._send_rpt(frame, RptType.NO_SUBSCRIBED_EXECUTOR)
+                            break
+                        # Executor exists and is subscribed - > send cmd
+                        self.registry[dest].put_nowait(frame)
+                    else:
+                        # NO_REGISTRED_EXECUTOR
+                        self._send_rpt(frame, RptType.NO_REGISTRED_EXECUTOR)
+                        break
 
-                # Routing
-                # For Command and Report
-                if frame.recipient:
-                    if frame.recipient in self.registry:
-                        self.registry[frame.recipient].put_nowait(frame)
-                # For Event
-                else:
-                    for addr, inbox in self.registry.items():
-                        # Do not send the event back to the sender
-                        if addr != frame.sender:
-                            inbox.put_nowait(frame)
-                            
+                # REPORTS message
+                elif frame.msg_type == MsgType.REPORT:
+                    dest = frame.recipient
+                    if dest in self.registry:
+                        self.registry[dest].put_nowait(frame)
+
+                # EVENT message
+                elif frame.msg_type == MsgType.EVENT:
+                    # Find subscribers-set in the dict of event subscribers
+                    subscribers = self._subscribers_evt.get(frame.evt_type, set())
+                    for addr in subscribers:
+                        # Dont send event to autor
+                        if addr != frame.sender and addr in self.registry:
+                            self.registry[addr].put_nowait(frame)
         except Empty:
             pass
         except Exception as e:
             print(f"[ERROR] Routing failed: {e}")
 
 
+    def _send_evt(self, type: EvtType, payload: dict):
+        frame=Frame(MsgType.EVENT, Addr.KERNEL, evt_type=type, payload=payload)
+        self.bus.put_nowait(frame)
+
+
+    def _send_rpt(self, cmd:Frame, type:RptType, payload:dict):
+        commander = cmd.sender
+        cmd_id = cmd.cmd_id
+        text = f"From: {cmd.sender} To: {commander} Type: {cmd.msg_type} "
+        text += f"SubType: {cmd.cmd_type or cmd.rpt_type or 'None'} cmd_id: {cmd_id}"
+        p = {"text":text}
+        rpt = Frame(MsgType.REPORT, Addr.KERNEL, rpt_type=type, cmd_id=cmd_id, payload=p)
+        self.bus.put_nowait(rpt)
+
+
+    def _shutdown_initialization(self):
+        # TODO correctly shutdown
+        self.stop()
+
+
     def stop(self):
         print("[Kernel] Shutdown initiated...")
         self.is_running = False
 
-    async def launch(self):
+
+    async def start(self):
         """core starter"""
         print("[Kernel] Running...")
         while self.is_running:

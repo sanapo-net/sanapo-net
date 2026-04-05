@@ -19,11 +19,11 @@ class Secretary:
     FAIL = -float('inf')# Task expires immediately
     EVER = float('inf') # Task never expires
 
-    def __init__(self, address: enums.Addr, tools):
+    def __init__(self, address: enums.Addr, outbox, inbox, coonfig):
         self.address = address
-        self._inbox = tools.inbox      # Read-only queue from Kernel
-        self._outbox = tools.outbox    # Write-only queue to Kernel
-        self.config = tools.config
+        self._inbox = inbox      # Read-only queue from Kernel
+        self._outbox = outbox    # Write-only queue to Kernel
+        self.config = coonfig
         self._cmd_counter = 0
         self._handlers_cmd: Dict[enums.CmdType, Callable] = {}
         self._handlers_evt: Dict[enums.EvtType, Callable] = {}

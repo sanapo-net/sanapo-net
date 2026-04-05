@@ -4,8 +4,8 @@ from core.enums import Addr
 from core.buffer.buffer_icmp import BufferICMP
 
 class BufferManager:
-    def __init__(self, proxy_obj, sec_creator):
-        self._icmp = BufferICMP(proxy_obj, sec_creator(Addr.BUFFER_ICMP))
+    def __init__(self, tools, get_secr):
+        self._icmp = BufferICMP(tools, get_secr(Addr.BUFFER_ICMP))
         #self._tcp = BufferTCP(proxy_obj, sec_creator(Addr.BUFFER_TCP)) # in future
         #self._snf = BufferDiscovery(proxy_obj, sec_creator(Addr.BUFFER_DISCOVERY)) # in future
 
