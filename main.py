@@ -4,12 +4,14 @@ from core.config import Config
 from core.kernel import Kernel
 from core.settings.settings_manager import SettingsManager
 from core.buffer.buffer_manager import BufferManager
+from core.network.network_manager import Network
 
 class Tools:
     """Data proxy object for modules"""
     config = Config()
-    settings = None
-    buffer = None
+    settings: SettingsManager = None
+    buffer: BufferManager = None
+    network: Network = None
 
 tools = Tools
 kernel = Kernel(tools)

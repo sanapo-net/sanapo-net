@@ -1,7 +1,6 @@
 # core/protocol.py
 from dataclasses import dataclass
-from typing import Optional, Any
-from core.enums import MsgType, Addr, RptType, MessageInitError
+from core.enums import Addr, MsgType, EvtType, CmdType, SysType, RptType, MessageInitError
 
 @dataclass(frozen=True)
 class Frame:
@@ -11,19 +10,19 @@ class Frame:
     The 'frozen=True' parameter makes the instance immutable,
     preventing accidental data modification during dispatching.
     """
-    # TODO add EvtType, CmdType, RptType, SysType
+
     msg_type: MsgType
     sender: Addr
-    sys_type: Optional[str] = None
-    evt_type: Optional[str] = None
-    cmd_type: Optional[str] = None
-    rpt_type: Optional[str] = None
-    recipient: Optional[Addr] = None
-    cmd_id: Optional[str] = None
-    deadline: Optional[float] = None
-    time_ext_req: Optional[float] = None
-    reason: Optional[str] = None
-    payload: Any = None # : dict
+    payload: dict[str, any]
+    sys_type: SysType | None = None
+    evt_type: EvtType | None = None
+    cmd_type: CmdType | None = None
+    rpt_type: RptType | None = None
+    recipient: Addr | None = None
+    cmd_id: str | None = None
+    deadline: float | None = None
+    time_ext_req: float | None = None
+    reason: str | None = None
 
     def __post_init__(self):
         if not isinstance(self.msg_type, MsgType):
@@ -36,12 +35,14 @@ class Frame:
                 if getattr(self, field) is None:
                     raise MessageInitError(f"Field '{field}' is mandatory for {self.msg_type}")
 
-        if self.msg_type == MsgType.COMMAND:
-            check_fields('cmd_type', 'recipient', 'cmd_id')
+        if self.msg_type == MsgType.SYSTEM:
+            check_fields('sys_type', 'payload')
+        elif self.msg_type == MsgType.COMMAND:
+            check_fields('cmd_type', 'recipient', 'cmd_id', 'payload')
         elif self.msg_type == MsgType.EVENT:
-            check_fields('evt_type')
+            check_fields('evt_type', 'payload')
         elif self.msg_type == MsgType.REPORT:
-            check_fields('rpt_type', 'recipient', 'cmd_id')
+            check_fields('rpt_type', 'recipient', 'cmd_id', 'payload')
             if self.rpt_type == RptType.TIME_EXTENSION_REQUEST:
                 check_fields('time_ext_req')
             if self.rpt_type == RptType.CANT_DO:

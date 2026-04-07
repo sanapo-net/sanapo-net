@@ -25,13 +25,11 @@ class Config():
     DEADLINE_EXTENSION_THRESHOLD = 0.3  # seconds
     SECRETARY_TICK_RATE_DEFAULT = 0.025 # seconds
     MODULE_TICK_SLA = {
-        "KERNEL": 0.002,
         "BUFFER_ICMP": 0.0045,
     }
     # SLA Registry for specific commands (Contractual timeouts)
     CMD_SLA = {
-        "CMD_TEST": 0.5,        # seconds
-        "CMD_SCAN_NET": 30.0,   # seconds
+        "CMD_TEST": 0.3,        # seconds
     }
 
     def get_secretary_tick(self, addr_name: str) -> float:

@@ -1,23 +1,27 @@
 # core/settings/settings_icmp.py
-from core.enums import TickInterval
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from main import Tools
+
+from core.enums import TickInterval, Priority
 
 class SettingsICMP:
-    def __init__(self, proxy_obj):
-        self.timeout_margin = proxy_obj.config.SCAN_ICMP_TIMEOUT_MARGIN
+    def __init__(self, tools: Tools) -> None:
+        self.timeout_margin = tools.config.SCAN_ICMP_TIMEOUT_MARGIN
         # Default state
         self._default_intervals = {
-            "high": TickInterval.SEC_1,
-            "mid":  TickInterval.SEC_2,
-            "low":  TickInterval.SEC_4
+            Priority.HIGH:  TickInterval.SEC_1,
+            Priority.MEDIUM:TickInterval.SEC_2,
+            Priority.LOW:   TickInterval.SEC_4
         }
         self._user_intervals = {
-            "high": TickInterval.SEC_1,
-            "mid":  TickInterval.SEC_2,
-            "low":  TickInterval.SEC_4
+            Priority.HIGH:  TickInterval.SEC_1,
+            Priority.MEDIUM:TickInterval.SEC_2,
+            Priority.LOW:   TickInterval.SEC_4
         }
-        self._interval_high = self._user_intervals["high"]
-        self._interval_medium = self._user_intervals["mid"]
-        self._interval_low = self._user_intervals["low"]
+        self._interval_high = self._user_intervals[Priority.HIGH]
+        self._interval_medium = self._user_intervals[Priority.MEDIUM]
+        self._interval_low = self._user_intervals[Priority.LOW]
         
         self._base_timeout = 0.4
         self._timeout_high = 0.4
@@ -25,7 +29,6 @@ class SettingsICMP:
         self._timeout_low = 0.4
         self._update_all_timeouts()
 
-    # TODO self.timeout_margin is not in core.config, it in class Config
     def _calculate_clamped_timeout(self, interval: TickInterval) -> float:
         """Ensures timeout never exceeds interval minus safety margin."""
         if interval == TickInterval.OFF:
@@ -34,7 +37,7 @@ class SettingsICMP:
         limit = max(0.1, interval.value - self.timeout_margin)
         return min(self._base_timeout, limit)
 
-    def _update_all_timeouts(self):
+    def _update_all_timeouts(self) -> None:
         """Recalculate all tiers based on new base timeout or intervals"""
         self._timeout_high = self._calculate_clamped_timeout(self._interval_high)
         self._timeout_medium = self._calculate_clamped_timeout(self._interval_medium)
@@ -54,32 +57,32 @@ class SettingsICMP:
             # If current was already > 8s, clamp it to 8s
             return TickInterval.SEC_8
 
-    def boost_speed(self):
+    def boost_speed(self) -> None:
         """Speeds up all active tiers"""
         self._interval_high = self._shift_interval(self._interval_high, -1)
         self._interval_medium = self._shift_interval(self._interval_medium, -1)
         self._interval_low = self._shift_interval(self._interval_low, -1)
         self._update_all_timeouts()
 
-    def relax_speed(self):
+    def relax_speed(self) -> None:
         """Slows down all active tiers"""
         self._interval_high = self._shift_interval(self._interval_high, 1)
         self._interval_medium = self._shift_interval(self._interval_medium, 1)
         self._interval_low = self._shift_interval(self._interval_low, 1)
         self._update_all_timeouts()
 
-    def normal_speed(self):
+    def normal_speed(self) -> None:
         """Restores former speed"""
-        self._interval_high = self._user_intervals["high"]
-        self._interval_medium = self._user_intervals["mid"]
-        self._interval_low = self._user_intervals["low"]
+        self._interval_high = self._user_intervals[Priority.HIGH]
+        self._interval_medium = self._user_intervals[Priority.MEDIUM]
+        self._interval_low = self._user_intervals[Priority.LOW]
         self._update_all_timeouts()
 
-    def reset_speed(self):
+    def reset_speed(self) -> None:
         """Restores baseline speed"""
-        self._interval_high = self._default_intervals["high"]
-        self._interval_medium = self._default_intervals["mid"]
-        self._interval_low = self._default_intervals["low"]
+        self._interval_high = self._default_intervals[Priority.HIGH]
+        self._interval_medium = self._default_intervals[Priority.MEDIUM]
+        self._interval_low = self._default_intervals[Priority.LOW]
         self._update_all_timeouts()
 
     # --- Properties with logic validation ---
@@ -88,6 +91,14 @@ class SettingsICMP:
     def base_timeout(self) -> float:
         return self._base_timeout
 
+    @property
+    def intervals(self) -> dict[Priority, TickInterval]:
+        return {
+            Priority.HIGH:  self._interval_high,
+            Priority.MEDIUM:self._interval_medium,
+            Priority.LOW:   self._interval_low
+            }
+    
     @property
     def interval_high(self) -> TickInterval:
         return self._interval_high
@@ -141,15 +152,15 @@ class SettingsICMP:
     def get_all_intervals(self) -> dict[str, TickInterval]:
         """Returns the current state of all three scanning intervals."""
         return {
-            "high": self._interval_high,
-            "mid":  self._interval_medium,
-            "low":  self._interval_low
+            Priority.HIGH:  self._interval_high,
+            Priority.MEDIUM:self._interval_medium,
+            Priority.LOW:   self._interval_low
         }
 
     def get_all_timeouts(self) -> dict[str, float]:
         """Returns the current calculated timeouts for all tiers."""
         return {
-            "high": self._timeout_high,
-            "mid":  self._timeout_medium,
-            "low":  self._timeout_low
+            Priority.HIGH:  self._timeout_high,
+            Priority.MEDIUM:self._timeout_medium,
+            Priority.LOW:   self._timeout_low
         }

@@ -1,10 +1,15 @@
 # core/settings_manager.py
+from typing import TYPE_CHECKING, Callable
+if TYPE_CHECKING:
+    from main import Tools
+    from core.secretary import Secretary
+    from core.network.network_manager import NetworkSnapshot
 
 from core.enums import Addr
 from core.settings.settings_icmp import SettingsICMP
 
 class SettingsManager:
-    def __init__(self, tools, get_secr):
+    def __init__(self, tools:Tools, get_secr: Callable[[str], Secretary]) -> None:
         self._icmp = SettingsICMP(tools) #, sec_creator(Addr.SETTINGS_ICMP))
         #self._icmp = SettingsPorts(proxy_obj, sec_creator(Addr.SETTINGS_PORTS))
         #self._icmp = SettingsSniffer(proxy_obj, sec_creator(Addr.SETTINGS_SNIFFER))

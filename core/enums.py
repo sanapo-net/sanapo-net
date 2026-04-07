@@ -1,7 +1,14 @@
 # core/enums.py
 from enum import Enum, unique
 
+@unique
+class Priority(int, Enum):
+    HIGH  = "high"
+    MEDIUM  = "medium"
+    LOW = "low"
 
+
+@unique
 class RollWin(int, Enum):
     MIN_1  = 60
     MIN_3  = 180 
@@ -21,6 +28,7 @@ class TickInterval(float, Enum):
     SEC_120  = 120.0
 
 
+@unique
 class Addr(str, Enum):
     KERNEL = "kernel"
     BUFFER_ICMP = "buffer_icmp"
@@ -74,16 +82,25 @@ class EvtType(str, Enum):
     ICMP_AGR_WIN_10M_READY = "icmp_agr_win_10m_ready"
     ICMP_AGR_DB_10M_READY = "icmp_agr_db_10m_ready"
     ICMP_RAW_DB_10M_READY = "icmp_raw_db_10m_ready"
+    ICMP_BUF_NEW_NET_VER_READY = "icmp_buf_new_net_ver_ready"
+    ICMP_UIDS_BY_LATENCY_READY = "icmp_uids_by_latency_ready"
     # Network
     NETWORK_NEW_VER = "network_new_ver"
+
+    # tempory common
+    ICMP_NEW_INTERVALS = "icmp_new_intervals"
 
 
 @unique
 class CmdType(str, Enum):
     """CommandType for the shared bus"""
     APP_STOP = "app_stop"
-    CANCEL_TASK = "cancel_task"
+    CANCEL_TASK = "cancel_task" # TODO check: dont send answer INTO_WORK e.t.c.
     CMD_TEST = "cmd_test"
+    # to ICMP buffer
+    ICMP_BUF_AGR_WIN_REQ = "icmp_buf_agr_win_req"
+    ICMP_BUF_AGR_DB_10M_REQ = "icmp_buf_agr_db_10m_req"
+    ICMP_BUF_RAW_DB_10M_REQ = "icmp_buf_raw_db_10m_req"
 
 
 @unique
@@ -115,7 +132,6 @@ class RptReason(str, Enum):
     """For CANT_DO and TIME_EXTENSION_REQUEST"""
     OK = "OK"
     SEE_PAYLOAD = "SEE_PAYLOAD"
-    
     # Rejection reasons (CANT_DO)
     MODULE_BUSY = "MODULE_BUSY"         # Single-threaded module is occupied
     INVALID_ARGS = "INVALID_ARGS"       # Command payload is corrupted or invalid

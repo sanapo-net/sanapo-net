@@ -1,4 +1,9 @@
 # core/kernel.py
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from main import Tools
+    from core.secretary import Secretary
+
 import asyncio
 from queue import Queue, Empty
 import time
@@ -9,16 +14,16 @@ from core.protocol import Frame
 from core.secretary import Secretary
 
 class Kernel:
-    def __init__(self, _tools):
-        self._tools = _tools
-        self._bus = Queue() 
+    def __init__(self, tools: Tools) -> None:
+        self._tools: Tools = tools
+        self._bus: Queue = Queue() 
         self._registry: dict[Addr, Queue] = {}
         self._subscribers_evt: dict[EvtType, set[Addr]] = {}
         self._subscribers_cmd: dict[CmdType, set[Addr]] = {}
         #self._subscribers_rpt: dict[RptType, set[Addr]] = {}
-        self._is_running = True
-        self._tick_counter = 0
-        self._ticks_lookup = (
+        self._is_running: bool = True
+        self._tick_counter: int = 0
+        self._ticks_lookup: set = (
             (240, EvtType.TICK_120),
             (48,  EvtType.TICK_24),
             (16,  EvtType.TICK_8),
@@ -28,14 +33,14 @@ class Kernel:
         )
         
 
-    def _check_and_run_ticker(self):
+    def _check_and_run_ticker(self) -> None:
         now = time.time()
         if now >= self._next_tick_time:
             self._ticker()
             self._next_tick_time = now + 0.5 
 
 
-    def _ticker(self):
+    def _ticker(self) -> None:
         """Heartbeat generator. RTT-ticks always go BEFORE Calendar-ticks."""
         self._tick_counter += 1
         payload = {"tick_id": self._tick_counter}
@@ -69,7 +74,7 @@ class Kernel:
         return Secretary(addr, outbox, inbox, config)
     
 
-    def _addr_deregister(self, addr: Addr):
+    def _addr_deregister(self, addr: Addr) -> None:
         """Final cleanup: wipes the address from all registries and subscriptions."""
         # Delete addr from subscribers
         for sub_dict in [self._subscribers_evt, self._subscribers_cmd]:
@@ -81,7 +86,7 @@ class Kernel:
         self._send_evt(EvtType.EVT_ADDR_DEREGISTER, {"addr":addr})
 
 
-    def _system_msg_handler(self, frame):
+    def _system_msg_handler(self, frame) -> None:
         """Universal handler for all subscriptions and deregistrations."""
         if sys_type == SysType.SYS_ADDR_DEREGISTER:
             return self._addr_deregister(frame.sender)
@@ -121,7 +126,7 @@ class Kernel:
                     sub_dict.get(msg_sub_type, set()).discard(addr)
     
 
-    def route_messages(self):
+    def route_messages(self) -> None:
         """
         Main mail sorter (Main Thread).
         Processes the incoming _bus and distributes messages to module inboxes.
@@ -188,12 +193,12 @@ class Kernel:
             print(f"[ERROR] Routing failed: {e}")
 
 
-    def _send_evt(self, type: EvtType, payload: dict):
+    def _send_evt(self, type: EvtType, payload: dict) -> None:
         frame=Frame(MsgType.EVENT, Addr.KERNEL, evt_type=type, payload=payload)
         self._bus.put_nowait(frame)
 
 
-    def _send_rpt(self, cmd:Frame, type:RptType, payload:dict):
+    def _send_rpt(self, cmd:Frame, type:RptType) -> None:
         commander = cmd.sender
         cmd_id = cmd.cmd_id
         text = f"From: {cmd.sender} To: {commander} Type: {cmd.msg_type} "
@@ -203,17 +208,17 @@ class Kernel:
         self._bus.put_nowait(rpt)
 
 
-    def _shutdown_initialization(self):
+    def _shutdown_initialization(self) -> None:
         # TODO correctly shutdown
         self.stop()
 
 
-    def stop(self):
+    def stop(self) -> None:
         print("[Kernel] Shutdown initiated...")
         self._is_running = False
 
 
-    async def launch(self):
+    async def launch(self) -> None:
         """core starter"""
         print("[Kernel] Running...")
         while self._is_running:
