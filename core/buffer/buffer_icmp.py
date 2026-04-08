@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 import numpy as np
 from threading import RLock
 
-from core.enums import EvtType, CmdType, RptType, RollWin, SanapoError
+from core.enums import EvtType, CmdType, RptType, RollWin, Metric, TickInterval, SanapoError
 
 class BufferICMP:
     """
@@ -33,11 +33,11 @@ class BufferICMP:
             err = f"Config Error: MAX ({self._spare_max}) <= TARGET ({self._spare_target})"
             raise SanapoError(err)
         
-        # agredated data by last "calendar" 10 minute
+        # Agredated data by last "calendar" 10 minute
         self._agr_db: dict[str, any] = None # {'start_time': start_time, 'res': res}
-        # raw data by last "calendar" 10 minute
+        # Raw data by last "calendar" 10 minute
         self._raw_db: dict[str, any] = None
-        # agredated data by last and prev time 1/3/10 minute window
+        # Agredated data by last and prev time 1/3/10 minute window
         self._agr_win = dict[RollWin, list[dict[str, any]]] = {
             RollWin.MIN_1: [{}, {}],
             RollWin.MIN_3: [{}, {}],
@@ -48,8 +48,9 @@ class BufferICMP:
         self._free_slots: list[int] = list(range(self._spare_target - 1, -1, -1))
         self._uid_to_col: dict[str, int] = {} # {uid:id_of_col_in_to_matrix, ...}
         
+        self._matrix_h = 10 * 60 / TickInterval.SEC_05 # 10 minutes
+        self._matrix = np.full((self._matrix_h, self._spare_target), np.nan, dtype=np.float16)
         self._head_idx: int = 0
-        self._matrix = np.full((1200, self._spare_target), np.nan, dtype=np.float16)
 
         self._secr.start()
         self._secr.configure_subscriptions(
@@ -76,7 +77,7 @@ class BufferICMP:
 
     def _on_agr_win_req(self, cmd: Frame) -> None:
         win = cmd.payload.get("RollWin", False)
-        if win:
+        if win and win in list(RollWin):
             payload = {win.name:[self._agr_win[win][0], self._agr_win[win][1]]}
         else:
             payload = {key.name:[val[0], val[1]] for key, val in self._agr_win.items()}
@@ -88,6 +89,10 @@ class BufferICMP:
     def _on_raw_db_10m_req(self, cmd: Frame) -> None:
         self._secr.send_rpt(cmd.sender, cmd.cmd_id, RptType.DONE, self._raw_db)
 
+    def _on_uids_by_latency_req(self, cmd: Frame) -> None:
+        self._secr.send_rpt(cmd.sender, cmd.cmd_id, RptType.DONE, {
+            "uids_by_latency": self._uids_by_latency
+        })
 
     # --- TICKING & DATA INGESTION ---
 
@@ -96,17 +101,18 @@ class BufferICMP:
         time = evt.payload["time"]
         self._agr_db = self._get_agr_db_10m_data(time)
         self._raw_db = self._get_raw_db_10m_data(time)
-        self._uids_by_latency = self._get_uids_by_latency(time)
-        self._secr.send_evt(EvtType.ICMP_AGR_DB_10M_READY, {"data": self._agr_db})
-        self._secr.send_evt(EvtType.ICMP_RAW_DB_10M_READY, {"data": self._raw_db})
-        paload = {"uids_by_latency": self._uids_by_latency}
-        self._secr.send_evt(EvtType.ICMP_UIDS_BY_LATENCY_READY, paload)
+        self._uids_by_latency = self._get_uids_by_latency()
+        self._secr.send_evt(EvtType.ICMP_AGR_DB_10M_READY, self._agr_db)
+        self._secr.send_evt(EvtType.ICMP_RAW_DB_10M_READY, self._raw_db)
+        self._secr.send_evt(EvtType.ICMP_UIDS_BY_LATENCY_READY, {
+            "uids_by_latency": self._uids_by_latency
+        })
 
     def _on_tick(self, evt: Frame) -> None:
         """Advances the circular buffer offset and executes pre-ingestion routines."""
         with self._lock:
             # Advance head pointer (0 -> 1199 -> 0)
-            self._head_idx = (self._head_idx + 1) % 1200
+            self._head_idx = (self._head_idx + 1) % self._matrix_h
             # Wipe the new row to clear the oldest data (10min old)
             self._matrix[self._head_idx, :] = np.nan
             self._tick_id = evt.payload['tick_id']
@@ -118,6 +124,7 @@ class BufferICMP:
         If the time for sliding window aggregation has arrived,
         it aggregates and emits an event with the aggregated data.
         """
+        # 1. Checkings
         payload_i = evt.payload
         # Frame with outdated topology data
         if payload_i['snapshot'].version != self._net_snapshot.version:
@@ -131,6 +138,8 @@ class BufferICMP:
             return
         # Frame with current data
         with self._lock:
+            
+            # 2. Send one tick metrics
             # Map UIDs from scanner's order to matrix columns
             target_cols = [self._uid_to_col[uid] for uid in self._active_uids]
             try:
@@ -145,24 +154,38 @@ class BufferICMP:
             except Exception as e:
                 print(f"[BufferICMP] Ingest failed: {e}")
 
-            # If the time of agregation, calc and send agregated data
-            # Calc agregated data by 1/3/10 minute windows and send data into event
+            # 3. Send one tick metrics
+            # Configuration mapping: Tick Type -> Associated Windows/Events
+            # Ordered from largest to smallest window
             evt_map = {
-                EvtType.TICK_8:   (RollWin.MIN_1,  EvtType.ICMP_AGR_WIN_1M_READY),
-                EvtType.TICK_24:  (RollWin.MIN_3,  EvtType.ICMP_AGR_WIN_3M_READY),
-                EvtType.TICK_120: (RollWin.MIN_10, EvtType.ICMP_AGR_WIN_10M_READY),
+                EvtType.TICK_120: [
+                    (RollWin.MIN_10, EvtType.ICMP_AGR_WIN_10M_READY),
+                    (RollWin.MIN_3,  EvtType.ICMP_AGR_WIN_3M_READY),
+                    (RollWin.MIN_1,  EvtType.ICMP_AGR_WIN_1M_READY)
+                ],
+                EvtType.TICK_24: [
+                    (RollWin.MIN_3,  EvtType.ICMP_AGR_WIN_3M_READY),
+                    (RollWin.MIN_1,  EvtType.ICMP_AGR_WIN_1M_READY)
+                ],
+                EvtType.TICK_8: [
+                    (RollWin.MIN_1,  EvtType.ICMP_AGR_WIN_1M_READY)
+                ]
             }
-            if evt.evt_type in list(evt_map.keys()):
-                win, evt = evt_map[evt.payload['tick_type']]
-                agr_data = self._get_agr_win_data(win)
-                payload_agr = {
+            # Get tasks for the current event
+            ticks_to_process = evt_map.get(evt.evt_type, [])
+
+            for win, ready_evt in ticks_to_process:
+                payload_o = {
                     'snapshot': self._net_snapshot,
                     'tick_id':  self._tick_id,
-                    'data':     agr_data
+                    'data':     self._get_agr_win_data(win)
                 }
-                self._agr_win[win].insert(0, payload_agr)
+                
+                # Update cache: Shift old data out, insert fresh data at the head
+                self._agr_win[win].insert(0, payload_o)
                 self._agr_win[win].pop()
-                self._secr.send_evt(evt, payload_agr)
+                
+                self._secr.send_evt(ready_evt, payload_o)
 
 
     # --- NET TOPOLOGY & MEMORY ---
@@ -198,7 +221,7 @@ class BufferICMP:
     def _expand_matrix(self) -> None:
         """Extends matrix width by 100 columns."""
         with self._lock:
-            ext = np.full((1200, 100), np.nan, dtype=np.float16)
+            ext = np.full((self._matrix_h, 100), np.nan, dtype=np.float16)
             old_w = self._matrix.shape[1]
             self._matrix = np.hstack([self._matrix, ext])
             self._free_slots.extend(range(old_w + 99, old_w - 1, -1))
@@ -219,7 +242,7 @@ class BufferICMP:
             if actual_w != (occupied_w + free_w):
                 # Critical bug: data/index mismatch. Reporting and aborting.
                 msg = f"Memory Invariant Violation! {actual_w} != {occupied_w} + {free_w}"
-                self._report_logic_err(msg)
+                self._secr.send_err_app(msg)
                 return
             
             # Check if shrinking is physically necessary
@@ -236,7 +259,7 @@ class BufferICMP:
                 for uid in uids_to_move:
                     if not safe_slots:
                         # Resource saturation: no room to evacuate. Postponing.
-                        self._report_logic_err("Evacuation failed: No safe slots!")
+                        self._secr.send_err_app("Evacuation failed: No safe slots!")
                         return 
                     
                     old_col = self._uid_to_col[uid]
@@ -258,115 +281,117 @@ class BufferICMP:
 
 
     # --- AGGREGATION ---
-    # TODO Optimize: Combine 10m window aggregation and 10m calendar aggregation for the DB
     
-    def _get_agr_win_data(self, window: RollWin) -> dict[str, any]:
+    def _compute_statistics(
+            self, calc_data: np.ndarray,
+            valid_mask: np.ndarray,
+            timeout_mask: np.ndarray,
+            min_samples: int
+        ) -> dict:
+        """Unified mathematical engine for RTT statistics."""
+        with np.errstate(all='ignore'):
+            sample_counts = np.sum(valid_mask | timeout_mask, axis=0)
+            perc = np.nanpercentile(calc_data, [5, 25, 50, 75, 95], axis=0)
+            res = {
+                Metric.P5:     perc[0],
+                Metric.P25:    perc[1],
+                Metric.P50:    perc[2],
+                Metric.P75:    perc[3],
+                Metric.P95:    perc[4],
+                Metric.MIN:    np.nanmin(calc_data, axis=0),
+                Metric.MAX:    np.nanmax(calc_data, axis=0),
+                Metric.AVG:    np.nanmean(calc_data, axis=0),
+                Metric.SUM_RTT:np.nansum(calc_data, axis=0),
+                Metric.SQ_SUM: np.nansum(np.square(calc_data), axis=0),
+                Metric.SAMPLE: sample_counts.astype(np.int32),
+                Metric.LOSS:   np.sum(timeout_mask, axis=0, dtype=np.int32),
+            }
+
+            # Quality Gate
+            q_mask = sample_counts < min_samples
+            for key, val in res.items():
+                if not isinstance(val, np.ndarray):
+                    continue
+                
+                if val.dtype.kind in 'fc':  # float (P50, AVG, ...)
+                    val[q_mask] = np.nan
+                elif val.dtype.kind in 'iu': # int (SAMPLE, LOSS)
+                    val[q_mask] = -1  # empty
+            return res
+        
+    def _get_agr_win_data(self, window: RollWin) -> dict[Metric, np.ndarray]:
         """
         Calculate metrics for rolling windows (1m, 3m, 10m).
-        Distinguishes between Timeouts (-1) and No Data (NaN).
+        Uses unified statistics engine and applies window-specific metrics.
         """
-        rows_needed = int(window / 0.5)
-        threshold_map = {
-            RollWin.MIN_1:  self._tools.settings.BUF_ICMP_MIN_PER_SAMPLES_1M,
-            RollWin.MIN_3:  self._tools.settings.BUF_ICMP_MIN_PER_SAMPLES_3M,
-            RollWin.MIN_10: self._tools.settings.BUF_ICMP_MIN_PER_SAMPLES_10M
-        }
-        min_pct = threshold_map.get(window, self._tools.settings.BUF_ICMP_MIN_PER_SAMPLES_DEFAULT)
-        min_samples = int(rows_needed * (min_pct / 100))
+        rows = int(window / TickInterval.SEC_05)
+        min_samples = self._get_min_samples_for_window(window, rows)
 
         with self._lock:
             # Shift circular buffer to linear: past at the top, present at the bottom
-            data = np.roll(self._matrix, shift=-(self._head_idx + 1), axis=0)[-rows_needed:, :]
+            data = np.roll(self._matrix, shift=-(self._head_idx + 1), axis=0)[-rows:, :]
+            snapshot = self._net_snapshot
+            uid_to_col = self._uid_to_col.copy()
         
-        # Masks for data filtering
-        valid_mask = data >= 0   # Real RTT values (excludes NaN and -1)
-        timeout_mask = data < 0  # Timeouts (-1)
-
-        # Prepare data for math: replace timeouts and skips with NaN to ignore them
+        valid_mask = data >= 0   # Masks: Real RTT values (excludes NaN and -1)
+        timeout_mask = data < 0  # Masks: Timeouts (-1)
         calc_data = np.where(valid_mask, data, np.nan)
 
-        with np.errstate(all='ignore'):
-            sample_counts = np.sum(valid_mask | timeout_mask, axis=0)
-            diffs = np.abs(np.diff(calc_data, axis=0)) # Jitter calculation
-            perc_values = np.nanpercentile(calc_data, [5, 25, 50, 75, 95], axis=0)
+        # 1. Base calcs
+        data = self._compute_statistics(calc_data, valid_mask, timeout_mask, min_samples)
 
-            data = {
-                "p5":           perc_values[0],
-                "p25":          perc_values[1],
-                "p50":          perc_values[2],
-                "p75":          perc_values[3],
-                "p95":          perc_values[4],
-                "min":          np.nanmin(calc_data, axis=0),
-                "max":          np.nanmax(calc_data, axis=0),
-                "sum_rtt":      np.nansum(calc_data, axis=0),
-                "sq_sum":       np.nansum(np.square(calc_data), axis=0),
-                "sample":       sample_counts.astype(np.int32),
-                "loss_count":   np.sum(timeout_mask, axis=0, dtype=np.int32),
-                "loss_streak":  self._get_max_streak(timeout_mask).astype(np.int32),
-                "delta_jitter": np.nanmean(diffs, axis=0),
-                "avg":          np.nanmean(calc_data, axis=0),
-            }
+        # 2. Specific calcs (Jitter, Streak, CV)
+        with np.errstate(all='ignore'):
+            # Jitter (diff between adjacent ticks)
+            diffs = np.abs(np.diff(calc_data, axis=0))
+            data[Metric.JITTER] = np.nanmean(diffs, axis=0)
             
-            # Stability Monitoring (Coefficient of Variation, deviation from avg in percent)
-            raw_cv = np.nanstd(calc_data, axis=0) / data["avg"]
+            # Loss Streak
+            data[Metric.STREAK] = self._get_max_streak(timeout_mask).astype(np.int32)
             
-            # Zero RTT Anomaly checking
-            inf_mask = np.isinf(raw_cv)
+            # Coefficient of variation (CV) and anomaly cheking (RTT=0)
+            data[Metric.CV] = np.nanstd(calc_data, axis=0) / data[Metric.AVG]
+            
+            inf_mask = np.isinf(data[Metric.CV])
             if np.any(inf_mask):
                 bad_uids = [self._active_uids[i] for i in np.where(inf_mask)[0]]
-                err = f"Data corruption or scanner failure: RTT is zero. bad_uids: {bad_uids}"
-                self._secr.send_err_app(err)
+                self._secr.send_err_app(f"Zero RTT anomaly detected: {bad_uids}")
 
-            # Clean up CV: replace Inf/NaN with proper NaN
-            data["cv"] = np.where(np.isfinite(raw_cv), raw_cv, np.nan)
+            # Cleaning up CV (replacing Inf with NaN)
+            data[Metric.CV] = np.where(np.isfinite(data[Metric.CV]), data[Metric.CV], np.nan)
 
-            # Quality Gate: if sample_counts < min_samples -> NaN
-            quality_mask = sample_counts < min_samples
-            for key in data:
-                if isinstance(data[key], np.ndarray):
-                    # Only apply to float arrays to preserve NaN support
-                    if data[key].dtype.kind in 'fc':
-                        data[key][quality_mask] = np.nan
-            return data
+        # 3. Finally Quality Gate (for Jitter, CV)
+        q_mask = data[Metric.SAMPLE] < min_samples
+        for m in (Metric.JITTER, Metric.CV):
+            data[m][q_mask] = np.nan
+        return {
+            "snapshot": snapshot,
+            "uid_to_col": uid_to_col,
+            "data": data
+        }
 
-    def _get_agr_db_10m_data(self, time: int) -> dict[str, np.ndarray]:
+    def _get_agr_db_10m_data(self, time: int) -> dict[str, any]:
         """Aggregates full 10-minute matrix for SQL export."""
+        # 1. Take data
         with self._lock:
             data = self._matrix.copy()
             uid_to_col = self._uid_to_col.copy()
-            snapshot = self._net_snapshot
-
-        # Masks for data filtering
+            snap = self._net_snapshot
+        # 2. Masks for data filtering
         valid_mask = data >= 0   # Real RTT values
         timeout_mask = data < 0  # Timeouts (-1)
-        
-        # Data preparation (Ignore -1 and NaN for mathematical stats)
+        # 3. Data preparation (Ignore -1 and NaN for mathematical stats)
         calc_data = np.where(valid_mask, data, np.nan)
+        # Min samples for longest interval (8 sec) 
+        # (10min*60sec/SEC_05) / (SEC_8/SEC_05) * 50% : 
+        min_samples = int(self._matrix_h / (TickInterval.SEC_8/TickInterval.SEC_05) * 0.5) 
+        return {
+            "snapshot": snap,
+            "uid_to_col": uid_to_col,
+            "end_time": time,
+            "data": self._compute_statistics(calc_data, valid_mask, timeout_mask, min_samples)
+        }
 
-        # Returns a 2D array [5, N_devices]
-        perc_values = np.nanpercentile(calc_data, [5, 25, 50, 75, 95], axis=0)
-        
-        with np.errstate(all='ignore'):
-            data = {
-                "p5":        perc_values[0],
-                "p25":       perc_values[1],
-                "p50":       perc_values[2],
-                "p75":       perc_values[3],
-                "p95":       perc_values[4],
-                "min":       np.nanmin(calc_data, axis=0),
-                "max":       np.nanmax(calc_data, axis=0),
-                "sum_rtt":   np.nansum(calc_data, axis=0),
-                "sq_sum":    np.nansum(np.square(calc_data), axis=0),
-                "sample":    np.sum(valid_mask | timeout_mask, axis=0, dtype=np.int32),
-                "loss_count":np.sum(timeout_mask, axis=0, dtype=np.int32),
-            }
-            return {
-                "snapshot":   snapshot,
-                "uid_to_col": uid_to_col,
-                "end_time":   time,
-                "data":       data
-            }
-        
     def _get_raw_db_10m_data(self, time: int) -> dict[str, any]:
         """
         Prepares a 10-minute raw data package for the DB Staging Area.
@@ -382,9 +407,58 @@ class BufferICMP:
                 "blob":      linear_matrix.tobytes() 
             }
 
-    # TODO CodeMe    
-    def _get_uids_by_latency(self) -> list[int]:
-        return []
+    def _get_uids_by_latency(self) -> list[str]:
+        """Sorts UIDs by median latency with exponential penalties for packet loss."""
+        # Safety check: if no data aggregated yet
+        if not self._agr_db or "data" not in self._agr_db:
+            return []
+
+        # 1. Extract metrics from 10m snapshot
+        metrics = self._agr_db["data"]
+        p50 = metrics["p50"].copy()        # [N] float32 - copy to keep original clean
+        loss_count = metrics["loss_count"] # [N] int32
+        samples = metrics["sample"]        # [N] int32
+        uid_to_col = self._agr_db["uid_to_col"]
+
+        # 2. Calculate loss ratio (0.0 to 1.0)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            loss_ratio = loss_count / samples
+            # Replace NaNs (0 samples) with 1.0 (100% loss)
+            loss_ratio = np.nan_to_num(loss_ratio, nan=1.0)
+
+        # 3. Mathematical penalty calculation (Thresholds %)
+        thresholds = np.array([0.0, 0.1, 0.2, 0.3, 0.5, 0.75])
+        
+        # Determine penalty level for each host (0 to 6)
+        penalty_levels = np.searchsorted(thresholds, loss_ratio, side='right')
+
+        # Apply exponential formula: 50 * 2^(level - 1)
+        # level 1 (x > 0%)   -> 50 * 2^0 = 50ms
+        # level 2 (x > 10%)  -> 50 * 2^1 = 100ms
+        # level 6 (x > 75%)  -> 50 * 2^5 = 1600ms
+        penalties = np.where(penalty_levels > 0, 50 * (2 ** (penalty_levels.astype(int) - 1)), 0)
+
+        # Apply penalties to medians
+        p50 += penalties
+
+        # 4. Sorting
+        # argsort returns indices that would sort the array
+        sorted_indices = np.argsort(p50)
+
+        # 5. Map indices back to UIDs
+        # Reverse mapping {column_index: UID}
+        col_to_uid = {v: k for k, v in uid_to_col.items()}
+        
+        return [col_to_uid[idx] for idx in sorted_indices]
+    
+    def _get_min_samples_for_window(self, window, rows):
+        threshold_map = {
+            RollWin.MIN_1:  self._tools.config.BUF_ICMP_MIN_PER_SAMPLES_1M,
+            RollWin.MIN_3:  self._tools.config.BUF_ICMP_MIN_PER_SAMPLES_3M,
+            RollWin.MIN_10: self._tools.config.BUF_ICMP_MIN_PER_SAMPLES_10M
+        }
+        min_pct = threshold_map.get(window, self._tools.config.BUF_ICMP_MIN_PER_SAMPLES_DEFAULT)
+        return int(rows * (min_pct / 100))
 
     def _get_max_streak(m_2d) -> NDArray[np.int32]:
         # Used into _calc_*(). Vertical stack a False row to handle edge cases at the start

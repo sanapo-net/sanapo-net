@@ -139,6 +139,30 @@ class RptReason(str, Enum):
     INTERNAL_ERROR = "INTERNAL_ERROR"   # Unhandled exception in module
 
 
+@unique
+class Metric(str, Enum):
+    # Percentiles for distribution analysis
+    P5      = "p5"
+    P25     = "p25"
+    P50     = "p50"   # Median
+    P75     = "p75"
+    P95     = "p95"
+    # Basic statistical bounds
+    MIN     = "min"
+    MAX     = "max"
+    AVG     = "avg"
+    CV      = "cv"
+    # Aggregated sums for secondary calculations (e.g., StdDev)
+    SUM_RTT = "sum_rtt"
+    SQ_SUM  = "sq_sum"  # Sum of squares
+    # Counters and reliability metrics
+    SAMPLE  = "sample" # int
+    LOSS    = "loss"   # int
+    STREAK  = "streak" # int
+    # Network-specific jitter calculation
+    JITTER  = "delta_jit"
+
+
 class SanapoError(Exception): pass
 class AddressBusyError(SanapoError): pass
 class MessageTypeError(SanapoError): pass
