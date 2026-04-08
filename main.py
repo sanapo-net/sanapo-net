@@ -15,6 +15,6 @@ class Tools:
 
 tools = Tools
 kernel = Kernel(tools)
-tools.settings = SettingsManager(tools, kernel.get_secr)
-tools.buffer = BufferManager(tools, kernel.get_secr)
+tools.settings = SettingsManager(tools, kernel.registration)
+tools.buffer = BufferManager(tools, kernel.registration)
 

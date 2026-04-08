@@ -95,6 +95,7 @@ class EvtType(str, Enum):
 class CmdType(str, Enum):
     """CommandType for the shared bus"""
     APP_STOP = "app_stop"
+    MODULE_STOP = "module_stop"
     CANCEL_TASK = "cancel_task" # TODO check: dont send answer INTO_WORK e.t.c.
     CMD_TEST = "cmd_test"
     # to ICMP buffer
@@ -124,7 +125,8 @@ class SysType(str, Enum):
     UNSUB_CMD = "unsub_cmd"
     SUB_EVT_SETUP = "sub_evt_setup"
     SUB_CMD_SETUP = "sub_cmd_setup"
-    SYS_ADDR_DEREGISTER  = "sys_addr_deregister"
+    ADDR_DEREGISTER  = "addr_deregister"
+    SECR_STOP = "secr_stop"
 
 
 @unique
@@ -137,6 +139,7 @@ class RptReason(str, Enum):
     INVALID_ARGS = "INVALID_ARGS"       # Command payload is corrupted or invalid
     RESOURCE_LOCKED = "RESOURCE_LOCKED" # Hardware or file is busy
     INTERNAL_ERROR = "INTERNAL_ERROR"   # Unhandled exception in module
+    NOT_IMPLEMENTED = "not_implemented"
 
 
 @unique

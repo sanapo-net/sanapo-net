@@ -12,7 +12,6 @@ from queue import Empty
 from core import enums
 from core.protocol import Frame
 
-# === TODO add SysType messages ===
 class Secretary:
     """
     Module's personal secretary. Runs in the module's thread.
@@ -45,10 +44,20 @@ class Secretary:
         # Commands received by this Massenger (as Executor)
         self._pending_in: dict[str, dict[str, any]] = {}  # {cmd_id: {deadline, sender}}
 
+        self._module = None
         self._is_running: bool = False
         self._thread: threading.Thread | None = None
 
-    # === Lifecycle management ===
+        self._send_sys(enums.SysType.SUB_CMD, {"list":[enums.CmdType.MODULE_STOP]})
+
+
+    # --- Lifecycle management ---
+    def set_module(self, module: any) -> None:
+        if self._module is not None:
+            self._module = module
+        else:
+            text = f"Detected second module set! SecrAddr: {self._address}. Obj: {module}"
+            self._send_err_app(text)
 
     def start(self) -> None:
         """Starts the background worker for message processing and deadline checks."""
@@ -62,6 +71,7 @@ class Secretary:
         self._is_running = False
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)
+        print(f"[Secretary]: {self._address.name} halted.")
 
     def process_once(self) -> None:
         """Single pass through the inbox and deadline checks (for sync or async calls)."""
@@ -84,7 +94,8 @@ class Secretary:
             else:    
                 time.sleep(0) # Yield for other threads
 
-    # === Subscriptions ===
+
+    # --- Subscriptions ---
 
     def subscribe(self,
             cb: Callable,
@@ -92,23 +103,36 @@ class Secretary:
             evt_type: enums.EvtType = None
         ) -> None:
         """Register a callback for a specific command or event type."""
-        if cmd_type: self._handlers_cmd[cmd_type] = cb
-        if evt_type: self._handlers_evt[evt_type] = cb
+        if cmd_type:
+            self._handlers_cmd[cmd_type] = cb
+            self._send_sys(enums.SysType.SUB_CMD, [cmd_type])
+        if evt_type:
+            self._handlers_evt[evt_type] = cb
+            self._send_sys(enums.SysType.SUB_EVT, [evt_type])
 
     def unsubscribe(self, cmd_type: enums.CmdType = None, evt_type: enums.EvtType = None) -> None:
         """Remove a previously registered callback."""
-        if cmd_type: self._handlers_cmd.pop(cmd_type, None)
-        if evt_type: self._handlers_evt.pop(evt_type, None)
+        if cmd_type:
+            self._handlers_cmd.pop(cmd_type, None)
+            self._send_sys(enums.SysType.UNSUB_CMD, [cmd_type])
+        if evt_type:
+            self._handlers_evt.pop(evt_type, None)
+            self._send_sys(enums.SysType.UNSUB_EVT, [evt_type])
 
     def configure_subscriptions(self,
             events: dict[enums.EvtType, Callable] = None, 
             commands: dict[enums.CmdType, Callable] = None
         ) -> None:
         """Batch register multiple handlers using dictionaries."""
-        if events: self._handlers_evt.update(events)
-        if commands: self._handlers_cmd.update(commands)
+        if events:
+            self._handlers_evt.update(events)
+            self._send_sys(enums.SysType.SUB_EVT_SETUP, list(events.keys()))
+        if commands:
+            self._handlers_cmd.update(commands)
+            self._send_sys(enums.SysType.SUB_CMD_SETUP, list(commands.keys()))
 
-    # === Outgoing messages ===
+
+    # --- Outgoing messages ---
 
     def send_evt(self, evt_type: enums.EvtType, payload: dict[str, any] = {}) -> None:
         """Broadcast an event to the system bus."""
@@ -206,10 +230,24 @@ class Secretary:
             self._is_busy = False
             self._pending_in.pop(cmd_id, None)
 
+    def _send_sys(self, sys_type: enums.SysType, payload: dict[str, list]) -> None:
+        """Sends system msg to kernel."""
+        frame = Frame(
+            msg_type=enums.MsgType.SYSTEM,
+            sender=self._address,
+            sys_type=sys_type,
+            payload=payload
+        )
+        self._outbox.put(frame)
     
     def send_err_app(self, text: str) -> None:
-        """Send & Print APPLogicErrorText"""
+        """Send & Print APPLogicErrorText as Module"""
         print(f"[{self._address.name}]: APPLogicError: {text}")
+        self.send_evt(enums.EvtType.ERR_LOGIC, {"text":text})
+
+    def _send_err_app(self, text: str) -> None:
+        """Send & Print APPLogicErrorText as Secretary"""
+        print(f"[SECRETARY]: APPLogicError: {text}")
         self.send_evt(enums.EvtType.ERR_LOGIC, {"text":text})
     
     def send_err(self, text: str) -> None:
@@ -231,8 +269,10 @@ class Secretary:
         """Send & Print UserWarningText"""
         print(f"[{self._address.name}]: Warning: {text}")
         self.send_evt(enums.EvtType.WRN, {"text":text})
-    
 
+    def unregister(self) -> None:
+        """del this secr from kernel registration system"""
+        self._send_sys(enums.SysType.ADDR_DEREGISTER, [])
 
     def modify_deadline(self, cmd_id: str, add_to_deadline: float) -> None:
         """Allows a commander to adjust the deadline of an active command."""
@@ -244,7 +284,8 @@ class Secretary:
             else:
                 self._pending_out[cmd_id]["deadline_done"] += add_to_deadline
 
-    # === Internal logic ===
+
+    # --- Internal logic ---
 
     def _read_inbox(self) -> None:
         """Fetches messages from the personal module inbox."""
@@ -256,49 +297,77 @@ class Secretary:
             pass
 
     def _handle_frame(self, frame: Frame) -> None:
-        """Processes a single incoming frame."""
-        now = time.perf_counter()
+        """Processes a single incoming frame with life-cycle management."""
+        # SYSTEM
+        if frame.msg_type == enums.MsgType.SYSTEM:
+            # SECR_STOP
+            if frame.sys_type == enums.SysType.SECR_STOP:
+                self.stop()
+            return
+        # EVENT
+        elif frame.msg_type == enums.MsgType.EVENT:
+            handler = self._handlers_evt.get(frame.evt_type)
+            if handler:
+                handler(frame)
+            return
+        # REPORT
+        elif frame.msg_type == enums.MsgType.REPORT:
+            self._handle_report(frame)
+            return
+        # COMMAND
+        elif frame.msg_type == enums.MsgType.COMMAND:
+            # MODULE_STOP
+            if frame.cmd_type == enums.CmdType.MODULE_STOP:
+                handler = self._handlers_cmd.get(enums.CmdType.MODULE_STOP)
+                if not handler and self._module is not None:
+                    handler = getattr(self._module, "stop", None)
 
-        # For single-threaded modules: Busy Management
-        if frame.msg_type == enums.MsgType.COMMAND:
-            # if the module does not have a thread pool and [is still busy] has not sent a report CANT_DO/DONE
+                if callable(handler):
+                    handler(frame) 
+                else:
+                    self._send_err_app(f"[{self._address.name}] has no stop() handler.")
+                    self.send_rpt(
+                        frame.sender, frame.cmd_id, 
+                        enums.RptType.CANT_DO, 
+                        reason=enums.RptReason.NOT_IMPLEMENTED
+                    )
+                return
+            
+            # Busy managment: CANT_DO: MODULE_BUSY
+            # _is_busy: have a command and has not sent a report CANT_DO/DONE)
             if not self.has_thread_pool and self._is_busy:
                 self.send_rpt(
                     recipient=frame.sender,
                     cmd_id=frame.cmd_id,
                     rpt_type=enums.RptType.CANT_DO,
                     reason=enums.RptReason.MODULE_BUSY,
-                    payload=f"Module {self._address.name} is currently processing another task."
                 )
                 return
-
-        # For pool-threaded modules:
-        # For console logging
-        start_ts = time.perf_counter()
             
-        if frame.msg_type == enums.MsgType.EVENT:
-            handler = self._handlers_evt.get(frame.evt_type)
-            if handler: handler(frame)
-
-        elif frame.msg_type == enums.MsgType.COMMAND:
-            # Automatic handshake (Secretary replies with INTO_WORK as a handshake)
-            self.send_rpt(frame.sender, frame.cmd_id, enums.RptType.INTO_WORK)
-            self._is_busy = True # Lock for new commands if single-threaded
-            
-            # Monitor this command for automatic TIME_EXTENSION_REQUEST requests
-            self._pending_in[frame.cmd_id] = {
-                "deadline": frame.deadline,
-                "sender": frame.sender
-            }
-            
+            # Module is free:            
             handler = self._handlers_cmd.get(frame.cmd_type)
-            if handler: 
+            if handler and callable(handler): 
+                # Handler exist
+                # Automatic handshake INTO_WORK
+                self.send_rpt(frame.sender, frame.cmd_id, enums.RptType.INTO_WORK)
+                self._is_busy = True 
+                # Monitor this command for automatic TIME_EXTENSION_REQUEST requests
+                self._pending_in[frame.cmd_id] = {
+                    "deadline": frame.deadline,
+                    "sender": frame.sender
+                }
                 handler(frame)
-            else: 
-                print(f"[Secretary] Warning: no handler for {frame.cmd_type}")
+            else:
+                # Handler doesn't exist
+                self._send_err_app(f"[{self._address}]: has no handler for {frame.cmd_type}")
+                self.send_rpt(
+                    frame.sender, frame.cmd_id, 
+                    enums.RptType.CANT_DO, 
+                    reason=enums.RptReason.NOT_IMPLEMENTED
+                )
 
-        elif frame.msg_type == enums.MsgType.REPORT:
-            self._handle_report(frame)
+
+        start_ts = time.perf_counter()
 
         # For console logging: checking durations and alarm if the work was long
         duration_ms = (time.perf_counter() - start_ts)
@@ -352,7 +421,8 @@ class Secretary:
                 )
                 info["deadline"] += extension
 
-    # === Console logging ===
+
+    # --- Console logging ---
 
     def _log_latency(self, duration_ms: float, frame: Frame) -> None:
         """Internal diagnostic tool to detect module blocking."""

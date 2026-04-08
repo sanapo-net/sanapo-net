@@ -3,19 +3,14 @@ from typing import TYPE_CHECKING, Callable
 if TYPE_CHECKING:
     from main import Tools
     from core.secretary import Secretary
-    from core.network.network_manager import NetworkSnapshot
+    from core.enums import Addr
 
 from core.enums import Addr
 from core.settings.settings_icmp import SettingsICMP
 
 class SettingsManager:
-    def __init__(self, tools:Tools, get_secr: Callable[[str], Secretary]) -> None:
-        self._icmp = SettingsICMP(tools) #, sec_creator(Addr.SETTINGS_ICMP))
-        #self._icmp = SettingsPorts(proxy_obj, sec_creator(Addr.SETTINGS_PORTS))
-        #self._icmp = SettingsSniffer(proxy_obj, sec_creator(Addr.SETTINGS_SNIFFER))
-        #self._icmp = SettingsGate(proxy_obj, sec_creator(Addr.SETTINGS_GATE))
-        #self._icmp = SettingsUI(proxy_obj, sec_creator(Addr.SETTINGS_UI))
-        #self._icmp = SettingsDB(proxy_obj, sec_creator(Addr.SETTINGS_DB))
+    def __init__(self, tools:Tools, registration: Callable) -> None:
+        self._icmp = SettingsICMP(tools)
 
     @property
     def icmp(self) -> SettingsICMP: return self._icmp
