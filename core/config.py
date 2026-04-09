@@ -1,4 +1,6 @@
 # core/config.py
+from core.enums import CmdType, Addr
+
 class Config():
     icmp_interval = 1000
     
@@ -28,20 +30,22 @@ class Config():
         "BUFFER_ICMP": 0.0045,
     }
     # SLA Registry for specific commands (Contractual timeouts)
-    CMD_SLA = {
-        "CMD_TEST": 0.3,        # seconds
+    CMD_SLA: dict[CmdType, float] = {
+        # in seconds
+        CmdType.CMD_TEST: 0.3,
+        CmdType.MODULE_STOP: 1,
     }
 
-    def get_secretary_tick(self, addr_name: str) -> float:
+    def get_secretary_tick(self, addr: Addr) -> float:
         """
         Returns the specific tick rate for a module's secretary.
         Falls back to SECRETARY_TICK_RATE_DEFAULT if no custom SLA is defined.
         """
-        return self.MODULE_TICK_SLA.get(addr_name, self.SECRETARY_TICK_RATE_DEFAULT)
+        return self.MODULE_TICK_SLA.get(addr, self.SECRETARY_TICK_RATE_DEFAULT)
     
-    def get_deadline_dur(self, cmd_name: str) -> float:
+    def get_deadline_dur(self, cmd_type: CmdType) -> float:
         """
         Returns the execution deadline for a specific command name.
         Falls back to DEFAULT_CMD_DEADLINE_DONE if not in SLA.
         """
-        return self.CMD_SLA.get(cmd_name, self.DEFAULT_CMD_DEADLINE_DONE)
+        return self.CMD_SLA.get(cmd_type, self.DEFAULT_CMD_DEADLINE_DONE)

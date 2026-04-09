@@ -1,6 +1,11 @@
 # core/enums.py
 from enum import Enum, unique
 
+class ShutdownTier(int, Enum):
+    LOGIC = 1
+    DATA  = 2
+    INFRA = 3
+    
 @unique
 class Priority(int, Enum):
     HIGH  = "high"
