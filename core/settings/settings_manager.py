@@ -9,7 +9,8 @@ from core.enums import Addr
 from core.settings.settings_icmp import SettingsICMP
 
 class SettingsManager:
-    def __init__(self, tools:Tools, registration: Callable) -> None:
+    def __init__(self, tools:Tools, setup_module: Callable) -> None:
+        self._tools: Tools = tools
         self._icmp = SettingsICMP(tools)
 
     @property

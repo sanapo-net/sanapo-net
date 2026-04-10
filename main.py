@@ -1,6 +1,7 @@
 # main.py
 from core.enums import Addr
 from core.config import Config
+from core.logger import Logger
 from core.kernel import Kernel
 from core.settings.settings_manager import SettingsManager
 from core.buffer.buffer_manager import BufferManager

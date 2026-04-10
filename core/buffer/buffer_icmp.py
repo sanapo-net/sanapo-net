@@ -6,6 +6,7 @@ if TYPE_CHECKING:
     from core.secretary import Secretary
     from numpy.typing import NDArray
     from core.protocol import Frame
+    from core.logger import Logger
 
 import numpy as np
 from threading import RLock
@@ -17,9 +18,10 @@ class BufferICMP:
     High-performance ICMP metrics buffer using circular NumPy matrices.
     Handles real-time ingestion, multi-tier aggregation, and thread-safe access.
     """
-    def __init__(self, tools: Tools, secr: Secretary) -> None:
-        self._secr: Secretary = secr
+    def __init__(self, tools: Tools, secr: Secretary, logger: Logger) -> None:
         self._tools: Tools = tools
+        self._secr: Secretary = secr
+        self._log: Logger = logger
         
         self._lock = RLock()
         
@@ -128,13 +130,11 @@ class BufferICMP:
         payload_i = evt.payload
         # Frame with outdated topology data
         if payload_i['snapshot'].version != self._net_snapshot.version:
-            text = "icmp_scanner provided icmp_buffer with stale snapshot data"
-            self._secr.send_evt(EvtType.LOG, {"text":text})
+            self._log.info(f"[{evt.sender.name}] provided data with outdated snapshot")
             return
         # Frame with outdated tick data
         if payload_i['tick_id'] != self._tick_id:
-            text = "icmp_scanner provided icmp_buffer with stale tick_id data"
-            self._secr.send_evt(EvtType.LOG, {"text":text})
+            self._log.info(f"[{evt.sender.name}] provided data with outdated tick_id")
             return
         # Frame with current data
         with self._lock:
@@ -152,7 +152,7 @@ class BufferICMP:
                 }
                 self._secr.send_evt(EvtType.ICMP_TICK_READY, payload_o)
             except Exception as e:
-                print(f"[BufferICMP] Ingest failed: {e}")
+                self._log.crit(f"Ingest failed: {e}")
 
             # 3. Send one tick metrics
             # Configuration mapping: Tick Type -> Associated Windows/Events
@@ -241,8 +241,7 @@ class BufferICMP:
             
             if actual_w != (occupied_w + free_w):
                 # Critical bug: data/index mismatch. Reporting and aborting.
-                msg = f"Memory Invariant Violation! {actual_w} != {occupied_w} + {free_w}"
-                self._secr.send_err_app(msg)
+                self._log.crit(f"Memory Invariant Violation! {actual_w} != {occupied_w} + {free_w}")
                 return
             
             # Check if shrinking is physically necessary
@@ -259,7 +258,7 @@ class BufferICMP:
                 for uid in uids_to_move:
                     if not safe_slots:
                         # Resource saturation: no room to evacuate. Postponing.
-                        self._secr.send_err_app("Evacuation failed: No safe slots!")
+                        self._log.err("Evacuation failed: No safe slots!")
                         return 
                     
                     old_col = self._uid_to_col[uid]
@@ -268,16 +267,14 @@ class BufferICMP:
                     # Physical data relocation (Column copy)
                     self._matrix[:, new_col] = self._matrix[:, old_col]
                     self._uid_to_col[uid] = new_col
-
-                    print(f"[BufferICMP] Evacuated {uid} from col {old_col} to {new_col}")
+                    self._log.info(f"Evacuated {uid} from col {old_col} to {new_col}")
 
             # Physical Truncation
             self._matrix = self._matrix[:, :target_w]
             
             # Index Reconciliation
             self._free_slots = [s for s in self._free_slots if s < target_w]
-            
-            print(f"[BufferICMP] Compaction success: {actual_w} -> {target_w}")
+            self._log.info(f"Compaction success: {actual_w} -> {target_w}")
 
 
     # --- AGGREGATION ---
@@ -355,7 +352,7 @@ class BufferICMP:
             inf_mask = np.isinf(data[Metric.CV])
             if np.any(inf_mask):
                 bad_uids = [self._active_uids[i] for i in np.where(inf_mask)[0]]
-                self._secr.send_err_app(f"Zero RTT anomaly detected: {bad_uids}")
+                self._log.err(f"Zero RTT anomaly detected: {bad_uids}")
 
             # Cleaning up CV (replacing Inf with NaN)
             data[Metric.CV] = np.where(np.isfinite(data[Metric.CV]), data[Metric.CV], np.nan)

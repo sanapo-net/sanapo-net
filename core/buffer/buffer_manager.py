@@ -8,8 +8,9 @@ from core.enums import Addr
 from core.buffer.buffer_icmp import BufferICMP
 
 class BufferManager:
-    def __init__(self, tools: Tools, registration: Callable) -> None:
-        self._icmp = registration(Addr.BUFFER_ICMP, BufferICMP)
+    def __init__(self, tools: Tools, setup_module: Callable) -> None:
+        self._tools: Tools = tools
+        self._icmp = setup_module(Addr.BUFFER_ICMP, BufferICMP)
 
     @property
     def icmp(self) -> BufferICMP: return self._icmp

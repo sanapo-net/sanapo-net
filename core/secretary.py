@@ -4,6 +4,7 @@ if TYPE_CHECKING:
     from queue import Queue
     from main import Tools
     from core.config import Config
+    from core.logger import Logger
 
 import time
 import threading
@@ -12,6 +13,8 @@ from queue import Empty
 from core import enums
 from core.protocol import Frame
 
+# TODO add MessageInitError cheking
+# TODO add send-methods for looger
 class Secretary:
     """
     Module's personal secretary. Runs in the module's thread.
@@ -24,17 +27,28 @@ class Secretary:
     FAIL = -float('inf')# Task expires immediately
     EVER = float('inf') # Task never expires
 
-    def __init__(self, address: enums.Addr, outbox: Queue, inbox: Queue, tools: Tools) -> None:
-        self._address: enums.Addr = address
+    def __init__(self,
+            address: enums.Addr,
+            outbox: Queue,
+            inbox: Queue,
+            tools: Tools,
+            logger: Logger
+    ) -> None:
+        
+        self.address: enums.Addr = address
+        self._module: any = None
+        self._log: Logger = logger
         self._inbox: Queue = inbox      # Read-only queue from Kernel
         self._outbox: Queue = outbox    # Write-only queue to Kernel
         self._config: Config = tools.config
+
+        self.has_thread_pool: bool = False  # Set to True by module if it uses own thread
+
         self._cmd_counter: int = 0
         self._handlers_cmd: dict[enums.CmdType, Callable] = {}
         self._handlers_evt: dict[enums.EvtType, Callable] = {}
         # Performance & Concurrency config
         self._tick_rate: float = self._config.get_secretary_tick(address.name)
-        self.has_thread_pool: bool = False  # Set to True by module if it uses own threads
         self._is_busy: bool = False         # Internal flag for single-threaded modules
         self._console_log_enabled: bool = True   # Toggle for health monitoring logs
         
@@ -44,7 +58,6 @@ class Secretary:
         # Commands received by this Massenger (as Executor)
         self._pending_in: dict[str, dict[str, any]] = {}  # {cmd_id: {deadline, sender}}
 
-        self._module = None
         self._is_running: bool = False
         self._thread: threading.Thread | None = None
 
@@ -56,8 +69,19 @@ class Secretary:
         if self._module is not None:
             self._module = module
         else:
-            text = f"Detected second module set! SecrAddr: {self._address}. Obj: {module}"
-            self._send_err_app(text)
+            self._log.err(f"[Secretary]: Detected second module set! Obj: {module}")
+
+    def set_logger(self, logger: any) -> None:
+        """Registers a logger object with the secretary to call its methods."""
+        if self._log is None:
+            if isinstance(logger, Logger):
+                self._log = logger
+            else:
+                err = f"[{self.address.name}]: NonLoggerType get in Secretary.get_logger()"
+                raise enums.SanapoError(err)
+        else:
+            self._log.err(f"[Secretary]: Detected second module set! Obj: {logger}")
+
 
     def start(self) -> None:
         """Starts the background worker for message processing and deadline checks."""
@@ -71,7 +95,7 @@ class Secretary:
         self._is_running = False
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)
-        print(f"[Secretary]: {self._address.name} halted.")
+        self._log.info(f"[Secretary]: {self.address.name} halted.")
 
     def process_once(self) -> None:
         """Single pass through the inbox and deadline checks (for sync or async calls)."""
@@ -138,7 +162,7 @@ class Secretary:
         """Broadcast an event to the system bus."""
         frame = Frame(
             msg_type=enums.MsgType.EVENT,
-            sender=self._address,
+            sender=self.address,
             evt_type=evt_type,
             payload=payload
         )
@@ -162,7 +186,7 @@ class Secretary:
         If a specific callback is not provided, the default 'cb' is used.
         """
         self._cmd_counter += 1
-        cmd_id = f"{self._address}_{self._cmd_counter}"
+        cmd_id = f"{self.address}_{self._cmd_counter}"
         now = time.perf_counter()
         
         # Map specific callbacks to default if None
@@ -190,7 +214,7 @@ class Secretary:
 
         frame = Frame(
             msg_type=enums.MsgType.COMMAND,
-            sender=self._address,
+            sender=self.address,
             recipient=recipient,
             cmd_type=cmd_type,
             cmd_id=cmd_id,
@@ -211,7 +235,7 @@ class Secretary:
         # Preparing base parameters
         kwargs = {
             "msg_type": enums.MsgType.REPORT,
-            "sender": self._address,
+            "sender": self.address,
             "recipient": recipient,
             "rpt_type": rpt_type,
             "cmd_id": cmd_id,
@@ -234,7 +258,7 @@ class Secretary:
         """Sends system msg to kernel."""
         frame = Frame(
             msg_type=enums.MsgType.SYSTEM,
-            sender=self._address,
+            sender=self.address,
             sys_type=sys_type,
             payload=payload
         )
@@ -242,7 +266,7 @@ class Secretary:
     
     def send_err_app(self, text: str) -> None:
         """Send & Print APPLogicErrorText as Module"""
-        print(f"[{self._address.name}]: APPLogicError: {text}")
+        print(f"[{self.address.name}]: APPLogicError: {text}")
         self.send_evt(enums.EvtType.ERR_LOGIC, {"text":text})
 
     def _send_err_app(self, text: str) -> None:
@@ -252,22 +276,22 @@ class Secretary:
     
     def send_err(self, text: str) -> None:
         """Send & Print UserErrorText"""
-        print(f"[{self._address.name}]: Error: {text}")
+        print(f"[{self.address.name}]: Error: {text}")
         self.send_evt(enums.EvtType.ERR, {"text":text})
 
     def send_log(self, text: str) -> None:
         """Send & Print LogText"""
-        print(f"[{self._address.name}]: Log: {text}")
+        print(f"[{self.address.name}]: Log: {text}")
         self.send_evt(enums.EvtType.LOG, {"text":text})
 
     def send_msg(self, text: str) -> None:
         """Send & Print UserMsgText"""
-        print(f"[{self._address.name}]: Msg: {text}")
+        print(f"[{self.address.name}]: Msg: {text}")
         self.send_evt(enums.EvtType.MSG, {"text":text})
 
     def send_wrn(self, text: str) -> None:
         """Send & Print UserWarningText"""
-        print(f"[{self._address.name}]: Warning: {text}")
+        print(f"[{self.address.name}]: Warning: {text}")
         self.send_evt(enums.EvtType.WRN, {"text":text})
 
     def unregister(self) -> None:
@@ -323,9 +347,9 @@ class Secretary:
                     handler = getattr(self._module, "stop", None)
 
                 if callable(handler):
-                    handler(frame) 
+                    handler(frame)
                 else:
-                    self._send_err_app(f"[{self._address.name}] has no stop() handler.")
+                    self._log.info("[Secretary]: called stop(), but module hasn't stop() handler")
                     self.send_rpt(
                         frame.sender, frame.cmd_id, 
                         enums.RptType.CANT_DO, 
@@ -359,7 +383,9 @@ class Secretary:
                 handler(frame)
             else:
                 # Handler doesn't exist
-                self._send_err_app(f"[{self._address}]: has no handler for {frame.cmd_type}")
+                # This shouldn't happen because the kernel shouldn't route
+                #     a command here if it isn't subscribed to.
+                self._log.err(f"[Secretary]: Was get a command, but hasn't handler", frame, "Sc")
                 self.send_rpt(
                     frame.sender, frame.cmd_id, 
                     enums.RptType.CANT_DO, 
@@ -442,6 +468,6 @@ class Secretary:
             if frame.cmd_type: ctx += f", Cmd: {frame.cmd_type}"
             if frame.cmd_id:   ctx += f", ID: {frame.cmd_id}"
             
-            print(f"[{level} > {max_t}ms] Module {self._address.name} BLOCKED Secretary! "
+            print(f"[{level} > {max_t}ms] Module {self.address.name} BLOCKED Secretary! "
                   f"Duration: {duration_ms:.1f}ms. Context: {ctx}. "
                   f"Sender: {frame.sender.name}. Payload: {frame.payload}")

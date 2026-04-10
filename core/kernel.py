@@ -12,11 +12,13 @@ from core.enums import AddressBusyError, UnknownAddressError
 from core.protocol import Frame
 from core.secretary import Secretary
 from core.config import Config
+from core.logger import Logger # TODO refact it
 
 class Kernel:
     def __init__(self, tools: Tools) -> None:
         self._tools: Tools = tools
         self._config: Config = Config()
+        self._log: Logger = Logger()
         
         self._is_running: bool = True
 
@@ -61,33 +63,31 @@ class Kernel:
         inbox = Queue()
         self._queue_reg[addr] = inbox
         sec =  Secretary(addr, outbox, inbox, config)
-        text = f"[Kernel] Secretary for module {addr.name} registered and instantiated."
-        self._send_evt(EvtType.LOG, {"text": text})
+        self._log.info(f"Secretary for {addr.name} registered and instantiated.")
         return sec
     
-    def registration(self,
+    def setup_module_environment(self,
             addr: Addr,
             module_class: type,
             tier: ShutdownTier,
             *args, **kwargs
         ) -> any:
         """
-        Factory method: creates a module, its secretary, binds them, 
+        Factory method: creates a module, its secretary, its logger, binds them,
         and registers the module for the shutdown sequence.
         """
         secr = self._get_secr(addr)
-        module_instance = module_class(self._tools, secr, *args, **kwargs)
-        secr.set_module(module_instance)
-        self._module_reg[addr] = module_instance
+        logger = Logger()
+        logger.set_secr(secr)
+        secr.set_logger(logger)
+        module = module_class(self._tools, secr, logger, *args, **kwargs)
+        secr.set_module(module)
+        self._module_reg[addr] = module
         if tier not in self._shutdown_tiers:
             self._shutdown_tiers[tier] = []
         self._shutdown_tiers[tier].append(addr)
-        
-        text = f"[Kernel] Module {addr.name} registered (Tier: {tier.name})."
-        self._send_evt(EvtType.LOG, {"text": text})
-        print(text)
-        
-        return module_instance
+        self._log.info(f"module {addr.name} registered (Tier: {tier.name}).")       
+        return module
 
     def _addr_deregister(self, addr: Addr) -> None:
         """Final cleanup: wipes the address from all registries and subscriptions."""
@@ -163,8 +163,7 @@ class Kernel:
             elif not isinstance(frame.payload["list"], list):
                 err = "payload['list'] is not list"
             if err:
-                text = f"[KERNEL]: SysType.{sys_type}:{err}"
-                self._send_evt(EvtType.ERR_LOGIC, {"text":text})
+                self._log.err(f"SysType.{sys_type}:{err}, sender: {addr.name}")
             else:
                 msg_sub_types = frame.payload["list"]
                 sub_dict, action = target_map[sys_type]
@@ -201,8 +200,7 @@ class Kernel:
             while not self._bus.empty() and processed_count < self._config.BUS_READ_LIMIT:
                 frame = self._bus.get_nowait()
                 if not isinstance(frame, Frame):
-                    text = "[KERNEL]: APPLogicError: into the Bus is not Frame type object"
-                    self._send_evt(EvtType.ERR_LOGIC, {"text": text})
+                    self._log.err("into the Bus is not Frame type object")
                     break
                 processed_count += 1
 
@@ -220,12 +218,14 @@ class Kernel:
                         if dest not in allowed_handlers:
                             # Executor exists, but it not subscribed for this CmdType
                             # NO_SUBSCRIBED_EXECUTOR
+                            self._log.info("detected NO_SUBSCRIBED_EXECUTOR.", frame, "SDc")
                             self._send_rpt(frame, RptType.NO_SUBSCRIBED_EXECUTOR)
                             break
                         # Executor exists and is subscribed - > send cmd
                         self._queue_reg[dest].put_nowait(frame)
                     else:
                         # NO_REGISTRED_EXECUTOR
+                        self._log.info("detected NO_REGISTRED_EXECUTOR.", frame, "SDc")
                         self._send_rpt(frame, RptType.NO_REGISTRED_EXECUTOR)
                         break
 
@@ -250,7 +250,7 @@ class Kernel:
         except Empty:
             pass
         except Exception as e:
-            print(f"[ERROR] Routing failed: {e}")
+            self._log.crit(f"Routing failed: {e}")
 
     # --- Messegers ---
 
@@ -258,6 +258,7 @@ class Kernel:
         frame=Frame(MsgType.EVENT, Addr.KERNEL, evt_type=type, payload=payload)
         self._bus.put_nowait(frame)
 
+    # TODO check it
     def _send_rpt(self, cmd:Frame, type:RptType) -> None:
         commander = cmd.sender
         cmd_id = cmd.cmd_id
@@ -283,8 +284,7 @@ class Kernel:
             )
             self._bus.put_nowait(frame)
         else:
-            text = f"[KERNEL]: try send MODULE_STOP to non registred module"
-            self._send_rpt(EvtType.ERR_LOGIC, {"text": text})
+            self._log.err(f"try send MODULE_STOP to non registred module. Target: {target}")
 
     def _send_secr_stop(self, target: Addr) -> None:
         """System message to secretary: STOP secretary"""
@@ -301,9 +301,7 @@ class Kernel:
         """Starts the tiered shutdown process."""
         if self._is_shutting_down: return
         self._is_shutting_down = True
-        
-        print(f"\n[KERNEL] !!! SHUTDOWN INITIATED !!!")
-        self._send_evt(EvtType.LOG, {"text": "System shutdown sequence started."})
+        self._log.info("Shutdown: started")
         
         self._current_tier_idx = 0
         self._prepare_next_tier()
@@ -321,9 +319,7 @@ class Kernel:
             self._current_tier_idx += 1
             self._prepare_next_tier()
             return
-
-        print(f"[KERNEL] [SHUTDOWN] Moving to {tier.name}...")
-        
+        self._log.info(f"Shutdown: Moving to {tier.name}")
         # Default deadline from config or 5s
         base_deadline = 5.0 
         
@@ -349,7 +345,7 @@ class Kernel:
         elif frame.rpt_type == RptType.TIME_EXTENSION_REQUEST:
             if frame.time_ext_req:
                 self._shutdown_tracker[addr]['deadline'] += frame.time_ext_req
-                print(f"[KERNEL] [SHUTDOWN] {addr.name} requested +{frame.time_ext_req}s")
+                self._log.info(f"Shutdown: {addr.name} requested +{frame.time_ext_req}s")
 
     def _check_shutdown_progress(self) -> None:
         """Monitors current tier progress and timeouts"""
@@ -360,7 +356,7 @@ class Kernel:
         expired = [addr for addr, info in self._shutdown_tracker.items() if now > info['deadline']]
         
         for addr in expired:
-            print(f"[KERNEL] [SHUTDOWN] Timeout for {addr.name}! Forcing SecrStop.")
+            self._log.info(f"Shutdown: Timeout for {addr.name}! Forcing SecrStop")
             self._shutdown_tracker.pop(addr)
             # We don't wait for them anymore
 
@@ -377,16 +373,16 @@ class Kernel:
 
 
     def stop(self) -> None:
-        print("[Kernel] Shutdown initiated...")
+        self._log.info("Shutdown ended")
         self._is_running = False
 
     async def launch(self) -> None:
         """core starter"""
-        print("[Kernel] Running...")
+        self._log.info("Running start")
         while self._is_running:
             self._route_messages()
             self._check_and_run_ticker()
             if self._is_shutting_down:
                 self._check_shutdown_progress()
             await asyncio.sleep(self._config.CORE_TICK_RATE)
-        print("[Kernel] Halted.")
+        self._log.info("Halted")
