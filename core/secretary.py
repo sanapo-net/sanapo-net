@@ -4,7 +4,6 @@ if TYPE_CHECKING:
     from queue import Queue
     from main import Tools
     from core.config import Config
-    from core.logger import Logger
 
 import time
 import threading
@@ -12,9 +11,9 @@ from queue import Empty
 
 from core import enums
 from core.protocol import Frame
+from core.logger import Logger
 
-# TODO add MessageInitError cheking
-# TODO add send-methods for looger
+# TODO now i dont like self._thread = threading.Thread(target=self._worker_loop, daemon=True)
 class Secretary:
     """
     Module's personal secretary. Runs in the module's thread.
@@ -26,6 +25,8 @@ class Secretary:
     KEEP = 0.0          # No change to current deadline
     FAIL = -float('inf')# Task expires immediately
     EVER = float('inf') # Task never expires
+
+    # --- Initialisation ---
 
     def __init__(self,
             address: enums.Addr,
@@ -63,16 +64,21 @@ class Secretary:
 
         self._send_sys(enums.SysType.SUB_CMD, {"list":[enums.CmdType.MODULE_STOP]})
 
-
-    # --- Lifecycle management ---
     def set_module(self, module: any) -> None:
+        """
+        Registers a module object with the secretary to call its methods directly. 
+        Only for Kernel.
+        """
         if self._module is not None:
             self._module = module
         else:
             self._log.err(f"[Secretary]: Detected second module set! Obj: {module}")
 
     def set_logger(self, logger: any) -> None:
-        """Registers a logger object with the secretary to call its methods."""
+        """
+        Registers a logger object with the secretary to call its methods.
+        Only for Kernel.
+        """
         if self._log is None:
             if isinstance(logger, Logger):
                 self._log = logger
@@ -82,6 +88,8 @@ class Secretary:
         else:
             self._log.err(f"[Secretary]: Detected second module set! Obj: {logger}")
 
+
+    # --- Lifecycle management ---
 
     def start(self) -> None:
         """Starts the background worker for message processing and deadline checks."""
@@ -122,9 +130,9 @@ class Secretary:
     # --- Subscriptions ---
 
     def subscribe(self,
-            cb: Callable,
-            cmd_type: enums.CmdType = None,
-            evt_type: enums.EvtType = None
+                cb: Callable,
+                cmd_type: enums.CmdType = None,
+                evt_type: enums.EvtType = None
         ) -> None:
         """Register a callback for a specific command or event type."""
         if cmd_type:
@@ -160,26 +168,24 @@ class Secretary:
 
     def send_evt(self, evt_type: enums.EvtType, payload: dict[str, any] = {}) -> None:
         """Broadcast an event to the system bus."""
-        frame = Frame(
+        self._safe_send(
             msg_type=enums.MsgType.EVENT,
-            sender=self.address,
             evt_type=evt_type,
             payload=payload
         )
-        self._outbox.put(frame)
 
     def send_cmd(self,
-            recipient: enums.Addr,
-            cmd_type: enums.CmdType,
-            cb: Callable, 
-            cb_done: Callable | None = None,
-            cb_canttodo: Callable | None = None,
-            cb_timeout_answ: Callable | None = None,
-            cb_timeout_done: Callable | None = None,
-            cb_time_ext_req: Callable | None = None,
-            deadline_answ_dur: float | None = None, # seconds
-            deadline_done_dur: float | None = None, # seconds
-            payload: dict[str, any] = {}
+                recipient: enums.Addr,
+                cmd_type: enums.CmdType,
+                cb: Callable, 
+                cb_done: Callable | None = None,
+                cb_canttodo: Callable | None = None,
+                cb_timeout_answ: Callable | None = None,
+                cb_timeout_done: Callable | None = None,
+                cb_time_ext_req: Callable | None = None,
+                deadline_answ_dur: float | None = None, # seconds
+                deadline_done_dur: float | None = None, # seconds
+                payload: dict[str, any] = {}
         ) -> None:
         """
         Sends a command to a specific recipient and tracks it with multiple callbacks.
@@ -212,94 +218,41 @@ class Secretary:
             "payload": payload
         }
 
-        frame = Frame(
+        self._safe_send(
             msg_type=enums.MsgType.COMMAND,
-            sender=self.address,
             recipient=recipient,
             cmd_type=cmd_type,
             cmd_id=cmd_id,
             payload=payload,
             deadline=d_done
         )
-        self._outbox.put(frame)
 
     def send_rpt(self,
-            recipient: enums.Addr,
-            cmd_id: str,
-            rpt_type: enums.RptType,
-            payload: dict[str, any] = {},
-            time_ext_req: float = None
+                recipient: enums.Addr,
+                cmd_id: str,
+                rpt_type: enums.RptType,
+                payload: dict[str, any] = {},
+                time_ext_req: float = None
         ) -> None:
         """Sends a report (reply) to a commander."""
-        
-        # Preparing base parameters
-        kwargs = {
-            "msg_type": enums.MsgType.REPORT,
-            "sender": self.address,
-            "recipient": recipient,
-            "rpt_type": rpt_type,
-            "cmd_id": cmd_id,
-            "payload": payload
-        }
-
-        # Specific
-        if rpt_type == enums.RptType.TIME_EXTENSION_REQUEST:
-            kwargs["time_ext_req"] = time_ext_req
-
-        frame = Frame(**kwargs)
-        self._outbox.put(frame)
-
+        self._safe_send(
+                msg_type=enums.MsgType.REPORT,
+                recipient=recipient,
+                rpt_type=rpt_type,
+                cmd_id=cmd_id,
+                payload=payload,
+                time_ext_req=time_ext_req  # _safe_send сам проигнорирует None, если во Frame он не обязателен
+        )
         # Cleanup if the task is finished
         if rpt_type in [enums.RptType.DONE, enums.RptType.CANT_DO]:
             self._is_busy = False
             self._pending_in.pop(cmd_id, None)
 
-    def _send_sys(self, sys_type: enums.SysType, payload: dict[str, list]) -> None:
-        """Sends system msg to kernel."""
-        frame = Frame(
-            msg_type=enums.MsgType.SYSTEM,
-            sender=self.address,
-            sys_type=sys_type,
-            payload=payload
-        )
-        self._outbox.put(frame)
-    
-    def send_err_app(self, text: str) -> None:
-        """Send & Print APPLogicErrorText as Module"""
-        print(f"[{self.address.name}]: APPLogicError: {text}")
-        self.send_evt(enums.EvtType.ERR_LOGIC, {"text":text})
-
-    def _send_err_app(self, text: str) -> None:
-        """Send & Print APPLogicErrorText as Secretary"""
-        print(f"[SECRETARY]: APPLogicError: {text}")
-        self.send_evt(enums.EvtType.ERR_LOGIC, {"text":text})
-    
-    def send_err(self, text: str) -> None:
-        """Send & Print UserErrorText"""
-        print(f"[{self.address.name}]: Error: {text}")
-        self.send_evt(enums.EvtType.ERR, {"text":text})
-
-    def send_log(self, text: str) -> None:
-        """Send & Print LogText"""
-        print(f"[{self.address.name}]: Log: {text}")
-        self.send_evt(enums.EvtType.LOG, {"text":text})
-
-    def send_msg(self, text: str) -> None:
-        """Send & Print UserMsgText"""
-        print(f"[{self.address.name}]: Msg: {text}")
-        self.send_evt(enums.EvtType.MSG, {"text":text})
-
-    def send_wrn(self, text: str) -> None:
-        """Send & Print UserWarningText"""
-        print(f"[{self.address.name}]: Warning: {text}")
-        self.send_evt(enums.EvtType.WRN, {"text":text})
-
-    def unregister(self) -> None:
-        """del this secr from kernel registration system"""
-        self._send_sys(enums.SysType.ADDR_DEREGISTER, [])
-
     def modify_deadline(self, cmd_id: str, add_to_deadline: float) -> None:
-        """Allows a commander to adjust the deadline of an active command."""
+        """
+        Allows a commander to adjust the deadline of an active command.
+        Only for Module as a Commander.
+        """
         if cmd_id in self._pending_out:
             if add_to_deadline == self.FAIL:
                 self._pending_out[cmd_id]["deadline_done"] = -1.0
@@ -307,6 +260,58 @@ class Secretary:
                 self._pending_out[cmd_id]["deadline_done"] = float('inf')
             else:
                 self._pending_out[cmd_id]["deadline_done"] += add_to_deadline
+
+    def _safe_send(self, **kwargs) -> None:
+        """Internal helper to create and queue a frame with validation."""
+        frame = None
+        try:
+            frame = Frame(sender=self.address, **kwargs)
+        except enums.MessageInitError as e:
+            m_type = kwargs.get('msg_type')
+            sub_type = (kwargs.get('cmd_type') or kwargs.get('rpt_type') or 
+                        kwargs.get('sys_type') or kwargs.get('evt_type'))
+            m_name = m_type.name if m_type else "UNKNOWN"
+            s_name = sub_type.name if hasattr(sub_type, 'name') else "UNKNOWN"
+            self._log.crit(f"[Secretary]: Bus Protocol Violation [{m_name}:{s_name}]: {e}")
+            return
+        try:
+            self._outbox.put(frame, block=False)
+        except Exception as e:
+            self._log.crit(f"[Secretary]: Outbox Error (Queue Full/Closed): {e}")
+
+    def _send_sys(self, sys_type: enums.SysType, payload: dict[str, list]) -> None:
+        """
+        Sends system msg to kernel.
+        Only for Secretary.
+        """
+        self._safe_send(
+            msg_type=enums.MsgType.SYSTEM,
+            sys_type=sys_type,
+            payload=payload
+        )
+
+    def _log_push(self, evt_type: enums.EvtType, payload: dict[str, list]) -> None:
+        """
+        Safely send Frame to the Bus for MsgLogger.
+        Only for Logger.
+        """
+        try:
+            frame = Frame(
+                msg_type=enums.MsgType.EVENT,
+                sender=self.address,
+                evt_type=evt_type,
+                payload=payload
+            )
+            self._outbox.put(frame, block=False)
+        except Exception as e:
+            print(f"Critical: [{self.address.name}]: Logger transport failed: {e}")
+
+    def _unregister(self) -> None:
+        """
+        Del this secretary from kernel registration system.
+        Only for Kernel.
+        """
+        self._send_sys(enums.SysType.ADDR_DEREGISTER, [])
 
 
     # --- Internal logic ---
@@ -322,103 +327,111 @@ class Secretary:
 
     def _handle_frame(self, frame: Frame) -> None:
         """Processes a single incoming frame with life-cycle management."""
-        # SYSTEM
-        if frame.msg_type == enums.MsgType.SYSTEM:
-            # SECR_STOP
-            if frame.sys_type == enums.SysType.SECR_STOP:
-                self.stop()
-            return
-        # EVENT
-        elif frame.msg_type == enums.MsgType.EVENT:
-            handler = self._handlers_evt.get(frame.evt_type)
-            if handler:
-                handler(frame)
-            return
-        # REPORT
-        elif frame.msg_type == enums.MsgType.REPORT:
-            self._handle_report(frame)
-            return
-        # COMMAND
-        elif frame.msg_type == enums.MsgType.COMMAND:
-            # MODULE_STOP
-            if frame.cmd_type == enums.CmdType.MODULE_STOP:
-                handler = self._handlers_cmd.get(enums.CmdType.MODULE_STOP)
-                if not handler and self._module is not None:
-                    handler = getattr(self._module, "stop", None)
-
-                if callable(handler):
-                    handler(frame)
-                else:
-                    self._log.info("[Secretary]: called stop(), but module hasn't stop() handler")
-                    self.send_rpt(
-                        frame.sender, frame.cmd_id, 
-                        enums.RptType.CANT_DO, 
-                        reason=enums.RptReason.NOT_IMPLEMENTED
-                    )
-                return
-            
-            # Busy managment: CANT_DO: MODULE_BUSY
-            # _is_busy: have a command and has not sent a report CANT_DO/DONE)
-            if not self.has_thread_pool and self._is_busy:
-                self.send_rpt(
-                    recipient=frame.sender,
-                    cmd_id=frame.cmd_id,
-                    rpt_type=enums.RptType.CANT_DO,
-                    reason=enums.RptReason.MODULE_BUSY,
-                )
-                return
-            
-            # Module is free:            
-            handler = self._handlers_cmd.get(frame.cmd_type)
-            if handler and callable(handler): 
-                # Handler exist
-                # Automatic handshake INTO_WORK
-                self.send_rpt(frame.sender, frame.cmd_id, enums.RptType.INTO_WORK)
-                self._is_busy = True 
-                # Monitor this command for automatic TIME_EXTENSION_REQUEST requests
-                self._pending_in[frame.cmd_id] = {
-                    "deadline": frame.deadline,
-                    "sender": frame.sender
-                }
-                handler(frame)
-            else:
-                # Handler doesn't exist
-                # This shouldn't happen because the kernel shouldn't route
-                #     a command here if it isn't subscribed to.
-                self._log.err(f"[Secretary]: Was get a command, but hasn't handler", frame, "Sc")
-                self.send_rpt(
-                    frame.sender, frame.cmd_id, 
-                    enums.RptType.CANT_DO, 
-                    reason=enums.RptReason.NOT_IMPLEMENTED
-                )
-
-
         start_ts = time.perf_counter()
+        # Msg type map
+        dispatch = {
+            enums.MsgType.SYSTEM: self._process_system,
+            enums.MsgType.EVENT:  self._process_event,
+            enums.MsgType.COMMAND: self._process_command,
+            enums.MsgType.REPORT: self._process_report,
+        }
+        handler = dispatch.get(frame.msg_type)
+        if handler:
+            handler(frame)
+        else:
+            self._log.err(f"Was got msg with Unknown type", frame, "MS")
+        duration_ms = (time.perf_counter() - start_ts) * 1000
+        self._log_task_duration(duration_ms, frame)
 
-        # For console logging: checking durations and alarm if the work was long
-        duration_ms = (time.perf_counter() - start_ts)
-        self._log_latency(duration_ms, frame)
+    def _process_system(self, frame: Frame) -> None:
+        """Processing system signals."""
+        if frame.sys_type == enums.SysType.SECR_STOP:
+            self.stop()
 
-    def _handle_report(self, frame: Frame) -> None:
+    def _process_event(self, frame: Frame) -> None:
+        """Processing event subscriptions."""
+        handler = self._handlers_evt.get(frame.evt_type)
+        if handler:
+            handler(frame)
+        else:
+            self._log.err(f"[Secretary]: Was get evt, but module hasn't subcr", frame, "Se")
+
+    def _process_command(self, frame: Frame) -> None:
+        """
+        Processing command subscriptions.
+        Command logic: stop, busy and start checks.
+        """
+        # Stop
+        if frame.cmd_type == enums.CmdType.MODULE_STOP:
+            self._execute_module_stop(frame)
+            return
+        # Only for one-thread modules
+        if not self.has_thread_pool and self._is_busy:
+            self.send_rpt(frame.sender, frame.cmd_id,
+                enums.RptType.CANT_DO,
+                reason=enums.RptReason.MODULE_BUSY
+            )
+            return
+        # Look for handler
+        handler = self._handlers_cmd.get(frame.cmd_type)
+        if handler and callable(handler):
+            self._execute_command(handler, frame)
+        else:
+            self._log.err("[Secretary]: Command received, but no handler found", frame, "Sc")
+            self.send_rpt(frame.sender, frame.cmd_id,
+                enums.RptType.CANT_DO,
+                reason=enums.RptReason.NOT_IMPLEMENTED)
+
+    def _process_report(self, frame: Frame) -> None:
         """Handles incoming reports for commands sent by this module."""
-        info = self._pending_out.get(frame.cmd_id)
-        if not info: return
+        cmd_info = self._pending_out.get(frame.cmd_id)
+        if not cmd_info:
+            self._log.err(f"Get report with unknowed cmd_id", frame, "Sri")
+            return
 
         if frame.rpt_type == enums.RptType.INTO_WORK:
-            info["deadline_answ"] = float('inf') # Mark as 'Reaction Received'
+            cmd_info["deadline_answ"] = float('inf') # Mark as 'Reaction Received'
 
         elif frame.rpt_type == enums.RptType.DONE:
-            info["cb_done"](frame)
+            cmd_info["cb_done"](frame)
             self._pending_out.pop(frame.cmd_id)
 
         elif frame.rpt_type == enums.RptType.CANT_DO:
-            info["cb_canttodo"](frame)
+            cmd_info["cb_canttodo"](frame)
             self._pending_out.pop(frame.cmd_id)
 
         elif frame.rpt_type == enums.RptType.TIME_EXTENSION_REQUEST:
             if frame.time_ext_req:
-                info["deadline_done"] += frame.time_ext_req
-            info["cb_time_ext_req"](frame)
+                cmd_info["deadline_done"] += frame.time_ext_req
+            cmd_info["cb_time_ext_req"](frame)
+
+    def _execute_module_stop(self, frame: Frame) -> None:
+        """Special logic for determining the stopping method."""
+        # First look for in handlers, when try module.stop()
+        handler = self._handlers_cmd.get(enums.CmdType.MODULE_STOP)
+        if not handler and self._module is not None:
+            handler = getattr(self._module, "stop", None)
+        if callable(handler):
+            handler(frame) 
+        else:
+            text = "[Secretary]: Called stop(), but module hasn't stop() handler"
+            self._log.info(text, frame, "S")
+            self.send_rpt(
+                frame.sender,
+                frame.cmd_id,
+                enums.RptType.CANT_DO,
+                reason=enums.RptReason.NOT_IMPLEMENTED
+            )
+
+    def _execute_command(self, handler: Callable, frame: Frame) -> None:
+        """Internal life cycle of command execution."""
+        self.send_rpt(frame.sender, frame.cmd_id, enums.RptType.INTO_WORK)
+        self._is_busy = True 
+        self._pending_in[frame.cmd_id] = {
+            "deadline": frame.deadline,
+            "sender": frame.sender
+        }
+        handler(frame)
 
     def _check_deadlines(self) -> None:
         """Validates all time constraints for outgoing and incoming tasks."""
@@ -447,27 +460,10 @@ class Secretary:
                 )
                 info["deadline"] += extension
 
+    def _log_task_duration(self, duration_ms: float, frame: Frame) -> None:
+        """Diagnostic tool to detect module blocking."""
+        durs = [0.001, 0.01, 0,1, 0,25, 0,5, 1.0, 2.0, 4.0, 8.0]
+        i = next((index for index, val in enumerate(durs) if duration_ms < val), len(durs))
+        speed = f"speed_{i}"
+        self._log.debug(f"Done {speed}: {duration_ms:.1f}ms", frame, "t")
 
-    # --- Console logging ---
-
-    def _log_latency(self, duration_ms: float, frame: Frame) -> None:
-        """Internal diagnostic tool to detect module blocking."""
-        if not self._console_log_enabled:
-            return
-            
-        thresholds = [0.1, 0.25, 0.5, 1, 2, 4, 8]
-        triggered = [t for t in thresholds if duration_ms >= t]
-        
-        if triggered:
-            max_t = max(triggered)
-            level = "CRITICAL" if max_t >= 1000 else "WARNING"
-            
-            # Contextual info based on message type
-            ctx = f"Type: {frame.msg_type.name}"
-            if frame.evt_type: ctx += f", Evt: {frame.evt_type}"
-            if frame.cmd_type: ctx += f", Cmd: {frame.cmd_type}"
-            if frame.cmd_id:   ctx += f", ID: {frame.cmd_id}"
-            
-            print(f"[{level} > {max_t}ms] Module {self.address.name} BLOCKED Secretary! "
-                  f"Duration: {duration_ms:.1f}ms. Context: {ctx}. "
-                  f"Sender: {frame.sender.name}. Payload: {frame.payload}")
