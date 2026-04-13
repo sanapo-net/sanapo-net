@@ -1,6 +1,13 @@
 # core/enums.py
 from enum import Enum, unique
 
+class Logs(str, Enum):
+    CRIT = "crit"
+    ERR = "err",
+    WRN = "wrn",
+    INFO = "info",
+    DEBUG = "debug"
+
 class ShutdownTier(int, Enum):
     LOGIC = 1
     DATA  = 2

@@ -1,5 +1,5 @@
 # core/config.py
-from core.enums import CmdType, Addr
+from core.enums import CmdType, Addr, TickInterval
 
 class Config():
     icmp_interval = 1000
@@ -18,8 +18,14 @@ class Config():
     BUF_ICMP_MIN_PER_SAMPLES_DEFAULT = 90 # %
 
     # For scanner
-    SCAN_ICMP_TIMEOUT_MARGIN = 0.1 # seconds
-
+    SCAN_ICMP_TIMEOUT_MARGIN = { # seconds
+        TickInterval.SEC_05: 0.1,
+        TickInterval.SEC_1: 0.1,
+        TickInterval.SEC_2: 0.15,
+        TickInterval.SEC_4: 0.15,
+        TickInterval.SEC_8: 0.2,
+        TickInterval.SEC_24: 0.2,
+    }
     # For the Secretary
     DEFAULT_CMD_DEADLINE_ANSW = 0.05    # seconds
     DEFAULT_CMD_DEADLINE_DONE = 0.8     # seconds
