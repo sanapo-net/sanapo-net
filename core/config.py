@@ -1,5 +1,5 @@
 # core/config.py
-from core.enums import CmdType, Addr, TickInterval
+from core.enums import CmdType, Addr, TickInterval, Logs
 
 class Config():
     icmp_interval = 1000
@@ -26,6 +26,13 @@ class Config():
         TickInterval.SEC_8: 0.2,
         TickInterval.SEC_24: 0.2,
     }
+    # For the Logger
+    DEFAULT_LOG_FLAGS = {
+        "console": [Logs.CRIT, Logs.ERR, Logs.WRN, Logs.INFO, Logs.DEBUG],
+        "file": [Logs.CRIT, Logs.ERR, Logs.WRN, Logs.INFO, Logs.DEBUG],
+        "message": [Logs.CRIT, Logs.ERR, Logs.WRN, Logs.INFO, Logs.DEBUG],
+    }
+
     # For the Secretary
     DEFAULT_CMD_DEADLINE_ANSW = 0.05    # seconds
     DEFAULT_CMD_DEADLINE_DONE = 0.8     # seconds
