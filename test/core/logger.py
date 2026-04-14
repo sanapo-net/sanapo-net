@@ -5,23 +5,43 @@
 import datetime
 import logging
 
-from core.enums import EvtType, Logs
-from core.secretary import Secretary
-from core.protocol import Frame
+'''
+I remove here core. cuz logger cant find core folder, idk why
+'''
+
+from enums import Addr, MsgType, EvtType, CmdType, SysType, RptType, MessageInitError
+from protocol import Frame
 # Added that cuz Any makes error without it, idk why
 from typing import Any
 
+class SecretaryTest:
+    def __init__ (self,
+        address: Addr,
+        name: str
+    ):
+        self.address = address
+
+    def send_evt(self, evt_type: EvtType, payload: dict[str, any] = {}) -> None:
+        """Broadcast an event to the system bus."""
+        frame = Frame(
+            msg_type=MsgType.EVENT,
+            sender=self.address,
+            evt_type=evt_type,
+            payload=payload
+        )
+        print(frame)
+
 class Logger:
-    def __init__(self, secr: Secretary, console: bool = True, bus: bool = True):
+    def __init__(self, secr: SecretaryTest, console: bool = True, bus: bool = True):
         # Recursion protection flag | Maybe add to flag matrix?
         self._is_logging = True
 
         self.secr = secr
         # Flag matrix
         self.flags = {
-            "console": [Logs.CRIT, Logs.ERR, Logs.WRN, Logs.INFO, Logs.DEBUG],
-            "message": [Logs.CRIT, Logs.ERR, Logs.WRN, Logs.INFO, Logs.DEBUG],
-            "file": [Logs.CRIT, Logs.ERR, Logs.WRN, Logs.INFO, Logs.DEBUG],
+            "CONSOLE": console,
+            "SEND_EVT": bus,
+            "FILE": True
         }
         # The levels put in the bus
         self.bus_levels = {
@@ -30,9 +50,9 @@ class Logger:
             "INFO": EvtType.LOG
         }
 
-    def set_secr(self, secr: Secretary) -> None:
-        if self._secr is None and isinstance(secr, Secretary):
-            self._secr = secr
+    def set_secr(self, secr: SecretaryTest) -> None:
+        if self.secr is None and isinstance(secr, SecretaryTest):
+            self.secr = secr
             self._address = secr.address
         else:
             self.wrn(f"Detected second module set! Obj: {secr}.")
@@ -54,18 +74,18 @@ class Logger:
         time_str = self._get_time()
 
         addr_name = self.secr.address.name if hasattr(self.secr, 'address') else "UNKNOWN"
-        
+
         formatted_msg = f"[{time_str}] [{addr_name}] [{level}]: {text}"
 
-        # Recursion protection
         if (not self._is_logging): return
 
-        if self.flags["console"]:
+        if self.flags["CONSOLE"]:
+            pass
             print(f"{outputColors[level]} {formatted_msg}.{defaulColor}")
-        if self.flags["file"]:
+        if self.flags["FILE"]:
             with open("system.log", "a", encoding="utf-8") as f:
                 f.write(formatted_msg + "\n")
-        if self.flags["message"] and level in self.bus_levels:
+        if self.flags["SEND_EVT"] and level in self.bus_levels:
             evt = self.bus_levels[level]
             bus_payload = {"msg": text}
             if payload:
@@ -77,10 +97,10 @@ class Logger:
 
     # ---- Log executing ----
     """
-    Read mask and return formated msg 
     Function for remove repeating in functions under
+    Read mask and return formated msg 
     """
-    def _read_mapping(frame: Frame | None = None, mask: str = "") -> None:
+    def _readingMapping(self, frame: Any = None, mask: str = ""):
         details = []
         mapping = {
             "M": f"Message type:{frame.msg_type}.",
@@ -104,7 +124,7 @@ class Logger:
 
     def err(self, text: str, frame: Any = None, mask: str = ""):
         if frame and mask:
-            details = self._read_mapping(frame, mask)
+            details = self._readingMapping(frame, mask)
 
             if details:
                 text = f"{text} | {' '.join(details)}"
@@ -112,7 +132,7 @@ class Logger:
 
     def crit(self, text: str, frame: Any = None, mask: str = ""):
         if frame and mask:
-            details = self._read_mapping(frame, mask)
+            details = self._readingMapping(frame, mask)
 
             if details:
                 text = f"{text} | {' '.join(details)}"
@@ -120,7 +140,7 @@ class Logger:
 
     def wrn(self, text: str, frame: Any = None, mask: str = ""):
         if frame and mask:
-            details = self._read_mapping(frame, mask)
+            details = self._readingMapping(frame, mask)
 
             if details:
                 text = f"{text} | {' '.join(details)}"
@@ -128,7 +148,7 @@ class Logger:
 
     def info(self, text: str, frame: Any = None, mask: str = ""):
         if frame and mask:
-            details = self._read_mapping(frame, mask)
+            details = self._readingMapping(frame, mask)
 
             if details:
                 text = f"{text} | {' '.join(details)}"
@@ -136,12 +156,37 @@ class Logger:
 
     def debug(self, text: str, frame: Any = None, mask: str = ""):
         if frame and mask:
-            details = self._read_mapping(frame, mask)
+            details = self._readingMapping(frame, mask)
 
             if details:
                 text = f"{text} | {' '.join(details)}"
         self._output("DEBUG", text)
 
+secr = SecretaryTest(Addr.KERNEL, "test")
+frame = Frame(
+    msg_type = MsgType.COMMAND,
+    sender = Addr.KERNEL,
+    payload = {"text": "TestThing"},
+    sys_type = SysType.APP_STOP,
+    evt_type = EvtType.EVT_TEST,
+    cmd_type = CmdType.APP_STOP,
+    rpt_type = RptType.CANT_DO,
+    recipient = Addr.KERNEL,
+    cmd_id = "1337",
+    deadline = 0.5,
+    time_ext_req = 15.9,
+    reason = "6 + 7 = siiix seeeeven"
+)
+logger = Logger(secr)
+# Again set logger protection
+logger.set_secr(secr)
+logger.set_secr(secr)
+logger.set_secr(secr)
+logger.wrn("Doesnt have food", frame, "MSRDTPtescriw")
+logger.info("Doesnt have food", frame, "MSRDPtTescriw")
+logger.crit("Doesnt have food", frame, "MSRDPtTescriw")
+logger.err("Doesnt have food", frame, "MSRDPtTescriw")
+logger.debug("Doesnt have food", frame, "MSRDPtTescriw")
 # Example how use into module
 # self.log = SmartLogger(self.secretary)
 # TODO dont remember: logger must can work in "without secretary mode"
