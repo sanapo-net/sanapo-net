@@ -1,6 +1,7 @@
 # core/enums.py
 from enum import Enum, unique
 
+@unique
 class Logs(str, Enum):
     CRIT = "crit"
     ERR = "err",
@@ -8,24 +9,29 @@ class Logs(str, Enum):
     INFO = "info",
     DEBUG = "debug"
 
+@unique
 class ShutdownTier(int, Enum):
     LOGIC = 1
     DATA  = 2
     INFRA = 3
-    
+
+@unique
+class SpeedShiftICMP(int, Enum):
+    LOW  = 1
+    NORM = 0
+    FAST = -1
+
 @unique
 class Priority(int, Enum):
     HIGH  = "high"
     MEDIUM  = "medium"
     LOW = "low"
 
-
 @unique
 class RollWin(int, Enum):
     MIN_1  = 60
     MIN_3  = 180 
     MIN_10 = 600
-
 
 @unique
 class TickInterval(float, Enum):
@@ -38,7 +44,6 @@ class TickInterval(float, Enum):
     SEC_8    = 8.0
     SEC_24   = 24.0
     SEC_120  = 120.0
-
 
 @unique
 class Addr(str, Enum):
@@ -53,14 +58,12 @@ class Addr(str, Enum):
     SETTINGS_UI = "settings_ui"
     SETTINGS_DB = "settings_db"
 
-
 @unique
 class MsgType(str, Enum):
     COMMAND = "cmd"
     REPORT = "rpt"
     EVENT = "evt"
     SYSTEM = "system"
-
 
 @unique
 class EvtType(str, Enum):
@@ -102,7 +105,6 @@ class EvtType(str, Enum):
     # tempory common
     ICMP_NEW_INTERVALS = "icmp_new_intervals"
 
-
 @unique
 class CmdType(str, Enum):
     """CommandType for the shared bus"""
@@ -115,7 +117,6 @@ class CmdType(str, Enum):
     ICMP_BUF_AGR_DB_10M_REQ = "icmp_buf_agr_db_10m_req"
     ICMP_BUF_RAW_DB_10M_REQ = "icmp_buf_raw_db_10m_req"
 
-
 @unique
 class RptType(str, Enum):
     """ReportType for the shared bus"""
@@ -125,7 +126,6 @@ class RptType(str, Enum):
     CANT_DO = "cant_do"
     NO_REGISTRED_EXECUTOR = "executor_missing"
     NO_SUBSCRIBED_EXECUTOR = "no_subscribed_executor"
-
 
 @unique
 class SysType(str, Enum):
@@ -140,7 +140,6 @@ class SysType(str, Enum):
     ADDR_DEREGISTER  = "addr_deregister"
     SECR_STOP = "secr_stop"
 
-
 @unique
 class RptReason(str, Enum):
     """For CANT_DO and TIME_EXTENSION_REQUEST"""
@@ -152,7 +151,6 @@ class RptReason(str, Enum):
     RESOURCE_LOCKED = "RESOURCE_LOCKED" # Hardware or file is busy
     INTERNAL_ERROR = "INTERNAL_ERROR"   # Unhandled exception in module
     NOT_IMPLEMENTED = "not_implemented"
-
 
 @unique
 class Metric(str, Enum):

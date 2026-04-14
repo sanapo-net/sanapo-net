@@ -440,7 +440,7 @@ class BufferICMP:
 
         # 4. Sorting
         # argsort returns indices that would sort the array
-        sorted_indices = np.argsort(p50)
+        sorted_indices = np.argsort(p50)[::-1]
 
         # 5. Map indices back to UIDs
         # Reverse mapping {column_index: UID}
