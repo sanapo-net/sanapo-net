@@ -5,21 +5,16 @@
 import datetime
 import logging
 
-'''
-I remove here core. cuz logger cant find core folder, idk why
-'''
+from core.enums import Addr, MsgType, EvtType, CmdType, SysType, RptType, MessageInitError, Logs
+from core.protocol import Frame
 
-from enums import Addr, MsgType, EvtType, CmdType, SysType, RptType, MessageInitError
-from protocol import Frame
-# Added that cuz Any makes error without it, idk why
-from typing import Any
-
-class SecretaryTest:
+class MockSecretary:
     def __init__ (self,
         address: Addr,
         name: str
     ):
         self.address = address
+        self.name = name
 
     def send_evt(self, evt_type: EvtType, payload: dict[str, any] = {}) -> None:
         """Broadcast an event to the system bus."""
@@ -32,16 +27,16 @@ class SecretaryTest:
         print(frame)
 
 class Logger:
-    def __init__(self, secr: SecretaryTest, console: bool = True, bus: bool = True):
+    def __init__(self, secr: MockSecretary, console: bool = True, bus: bool = True):
         # Recursion protection flag | Maybe add to flag matrix?
         self._is_logging = True
 
         self.secr = secr
         # Flag matrix
         self.flags = {
-            "CONSOLE": console,
-            "SEND_EVT": bus,
-            "FILE": True
+            "console": [Logs.CRIT, Logs.ERR, Logs.WRN, Logs.INFO, Logs.DEBUG],
+            "message": [Logs.CRIT, Logs.ERR, Logs.WRN, Logs.INFO, Logs.DEBUG],
+            "file": [Logs.CRIT, Logs.ERR, Logs.WRN, Logs.INFO, Logs.DEBUG],
         }
         # The levels put in the bus
         self.bus_levels = {
@@ -50,9 +45,9 @@ class Logger:
             "INFO": EvtType.LOG
         }
 
-    def set_secr(self, secr: SecretaryTest) -> None:
-        if self.secr is None and isinstance(secr, SecretaryTest):
-            self.secr = secr
+    def set_secr(self, secr: MockSecretary) -> None:
+        if not hasattr(self, "_secr") and isinstance(secr, MockSecretary):
+            self._secr = secr
             self._address = secr.address
         else:
             self.wrn(f"Detected second module set! Obj: {secr}.")
@@ -65,7 +60,7 @@ class Logger:
         defaulColor = "\033[0m" # white
         outputColors = {
             "ERR": "\033[31m",  # red
-            "CRITICAL": "\033[31m", # red Zozda
+            "CRITICAL": "\033[31m", # red
             "WRN": "\033[33m",  # yellow
             "INFO": "\033[0m",  # white
             "DEBUG": "\033[90m" # gray
@@ -74,18 +69,17 @@ class Logger:
         time_str = self._get_time()
 
         addr_name = self.secr.address.name if hasattr(self.secr, 'address') else "UNKNOWN"
-
+        
         formatted_msg = f"[{time_str}] [{addr_name}] [{level}]: {text}"
 
-        if (not self._is_logging): return
+        if not self._is_logging: return
 
-        if self.flags["CONSOLE"]:
-            pass
+        if self.flags["console"]:
             print(f"{outputColors[level]} {formatted_msg}.{defaulColor}")
-        if self.flags["FILE"]:
+        if self.flags["file"]:
             with open("system.log", "a", encoding="utf-8") as f:
                 f.write(formatted_msg + "\n")
-        if self.flags["SEND_EVT"] and level in self.bus_levels:
+        if self.flags["message"] and level in self.bus_levels:
             evt = self.bus_levels[level]
             bus_payload = {"msg": text}
             if payload:
@@ -96,20 +90,21 @@ class Logger:
                 self._is_logging = False
 
     # ---- Log executing ----
+    
     """
-    Function for remove repeating in functions under
     Read mask and return formated msg 
+    Function for remove repeating in functions under
     """
-    def _readingMapping(self, frame: Any = None, mask: str = ""):
+    def _read_mapping(self, frame: Frame | None = None, mask: str = "") -> list:
         details = []
         mapping = {
-            "M": f"Message type:{frame.msg_type}.",
+            "M": f"{frame.msg_type}.",
             "S": f"From:{frame.sender.name}.",
             "R": f"Recipient:{frame.recipient}.",
-            "P": f"Payload:{frame.payload["text"] if (frame.payload) else "N/А"}.",
+            "P": f"Payload:{frame.payload['text'] if (frame.payload) else 'N/А'}.",
             "D": f"Deadline:{frame.deadline}.",
             "T": f"Exit time:{frame.time_ext_req}.",
-            "t": f"SubType:{frame.evt_type or frame.sys_type or frame.cmd_type or frame.rpt_type}.",
+            "t": f"{frame.evt_type or frame.sys_type or frame.cmd_type or frame.rpt_type}.",
             "e": f"Evt:{frame.evt_type.value if frame.evt_type else 'N/A'}.",
             "s": f"Sys:{frame.sys_type.value if frame.sys_type else 'N/A'}.",
             "c": f"Cmd:{frame.cmd_type.value if frame.cmd_type else 'N/A'}.",
@@ -122,47 +117,47 @@ class Logger:
             details.append(mapping[char])
         return details
 
-    def err(self, text: str, frame: Any = None, mask: str = ""):
+    def err(self, text: str, frame: Frame | None = None, mask: str = ""):
         if frame and mask:
-            details = self._readingMapping(frame, mask)
+            details = self._read_mapping(frame, mask)
 
             if details:
                 text = f"{text} | {' '.join(details)}"
         self._output("ERR", text)
 
-    def crit(self, text: str, frame: Any = None, mask: str = ""):
+    def crit(self, text: str, frame: Frame | None = None, mask: str = ""):
         if frame and mask:
-            details = self._readingMapping(frame, mask)
+            details = self._read_mapping(frame, mask)
 
             if details:
                 text = f"{text} | {' '.join(details)}"
         self._output("CRITICAL", text)
 
-    def wrn(self, text: str, frame: Any = None, mask: str = ""):
+    def wrn(self, text: str, frame: Frame | None = None, mask: str = ""):
         if frame and mask:
-            details = self._readingMapping(frame, mask)
+            details = self._read_mapping(frame, mask)
 
             if details:
                 text = f"{text} | {' '.join(details)}"
         self._output("WRN", text)
 
-    def info(self, text: str, frame: Any = None, mask: str = ""):
+    def info(self, text: str, frame: Frame | None = None, mask: str = ""):
         if frame and mask:
-            details = self._readingMapping(frame, mask)
+            details = self._read_mapping(frame, mask)
 
             if details:
                 text = f"{text} | {' '.join(details)}"
         self._output("INFO", text)
 
-    def debug(self, text: str, frame: Any = None, mask: str = ""):
+    def debug(self, text: str, frame: Frame | None = None, mask: str = ""):
         if frame and mask:
-            details = self._readingMapping(frame, mask)
+            details = self._read_mapping(frame, mask)
 
             if details:
                 text = f"{text} | {' '.join(details)}"
         self._output("DEBUG", text)
-
-secr = SecretaryTest(Addr.KERNEL, "test")
+        
+secr = MockSecretary(Addr.KERNEL, "test")
 frame = Frame(
     msg_type = MsgType.COMMAND,
     sender = Addr.KERNEL,
@@ -178,7 +173,7 @@ frame = Frame(
     reason = "6 + 7 = siiix seeeeven"
 )
 logger = Logger(secr)
-# Again set logger protection
+# Again set logger protection test
 logger.set_secr(secr)
 logger.set_secr(secr)
 logger.set_secr(secr)

@@ -1,2 +1,5 @@
 .git/
 venv/
+core/__pycache__/
+core/tests/core/logger/__pycache__/
+*.log

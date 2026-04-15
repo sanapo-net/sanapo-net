@@ -14,7 +14,7 @@ class ShutdownTier(int, Enum):
     INFRA = 3
     
 @unique
-class Priority(int, Enum):
+class Priority(str, Enum):
     HIGH  = "high"
     MEDIUM  = "medium"
     LOW = "low"

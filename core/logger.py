@@ -8,8 +8,6 @@ import logging
 from core.enums import EvtType, Logs
 from core.secretary import Secretary
 from core.protocol import Frame
-# Added that cuz Any makes error without it, idk why
-from typing import Any
 
 class Logger:
     def __init__(self, secr: Secretary, console: bool = True, bus: bool = True):
@@ -31,7 +29,7 @@ class Logger:
         }
 
     def set_secr(self, secr: Secretary) -> None:
-        if self._secr is None and isinstance(secr, Secretary):
+        if not hasattr(self, "_secr") and isinstance(secr, Secretary):
             self._secr = secr
             self._address = secr.address
         else:
@@ -45,7 +43,7 @@ class Logger:
         defaulColor = "\033[0m" # white
         outputColors = {
             "ERR": "\033[31m",  # red
-            "CRITICAL": "\033[31m", # red Zozda
+            "CRITICAL": "\033[31m", # red
             "WRN": "\033[33m",  # yellow
             "INFO": "\033[0m",  # white
             "DEBUG": "\033[90m" # gray
@@ -57,8 +55,7 @@ class Logger:
         
         formatted_msg = f"[{time_str}] [{addr_name}] [{level}]: {text}"
 
-        # Recursion protection
-        if (not self._is_logging): return
+        if not self._is_logging: return
 
         if self.flags["console"]:
             print(f"{outputColors[level]} {formatted_msg}.{defaulColor}")
@@ -76,20 +73,21 @@ class Logger:
                 self._is_logging = False
 
     # ---- Log executing ----
+    
     """
     Read mask and return formated msg 
     Function for remove repeating in functions under
     """
-    def _read_mapping(frame: Frame | None = None, mask: str = "") -> None:
+    def _read_mapping(self, frame: Frame | None = None, mask: str = "") -> list:
         details = []
         mapping = {
-            "M": f"Message type:{frame.msg_type}.",
+            "M": f"{frame.msg_type}.",
             "S": f"From:{frame.sender.name}.",
             "R": f"Recipient:{frame.recipient}.",
-            "P": f"Payload:{frame.payload["text"] if (frame.payload) else "N/А"}.",
+            "P": f"Payload:{frame.payload['text'] if (frame.payload) else 'N/А'}.",
             "D": f"Deadline:{frame.deadline}.",
             "T": f"Exit time:{frame.time_ext_req}.",
-            "t": f"SubType:{frame.evt_type or frame.sys_type or frame.cmd_type or frame.rpt_type}.",
+            "t": f"{frame.evt_type or frame.sys_type or frame.cmd_type or frame.rpt_type}.",
             "e": f"Evt:{frame.evt_type.value if frame.evt_type else 'N/A'}.",
             "s": f"Sys:{frame.sys_type.value if frame.sys_type else 'N/A'}.",
             "c": f"Cmd:{frame.cmd_type.value if frame.cmd_type else 'N/A'}.",
@@ -102,7 +100,7 @@ class Logger:
             details.append(mapping[char])
         return details
 
-    def err(self, text: str, frame: Any = None, mask: str = ""):
+    def err(self, text: str, frame: Frame | None = None, mask: str = "") -> None:
         if frame and mask:
             details = self._read_mapping(frame, mask)
 
@@ -110,7 +108,7 @@ class Logger:
                 text = f"{text} | {' '.join(details)}"
         self._output("ERR", text)
 
-    def crit(self, text: str, frame: Any = None, mask: str = ""):
+    def crit(self, text: str, frame: Frame | None = None, mask: str = "") -> None:
         if frame and mask:
             details = self._read_mapping(frame, mask)
 
@@ -118,7 +116,7 @@ class Logger:
                 text = f"{text} | {' '.join(details)}"
         self._output("CRITICAL", text)
 
-    def wrn(self, text: str, frame: Any = None, mask: str = ""):
+    def wrn(self, text: str, frame: Frame | None = None, mask: str = "") -> None:
         if frame and mask:
             details = self._read_mapping(frame, mask)
 
@@ -126,7 +124,7 @@ class Logger:
                 text = f"{text} | {' '.join(details)}"
         self._output("WRN", text)
 
-    def info(self, text: str, frame: Any = None, mask: str = ""):
+    def info(self, text: str, frame: Frame | None = None, mask: str = "") -> None:
         if frame and mask:
             details = self._read_mapping(frame, mask)
 
@@ -134,7 +132,7 @@ class Logger:
                 text = f"{text} | {' '.join(details)}"
         self._output("INFO", text)
 
-    def debug(self, text: str, frame: Any = None, mask: str = ""):
+    def debug(self, text: str, frame: Frame | None = None, mask: str = "") -> None:
         if frame and mask:
             details = self._read_mapping(frame, mask)
 
