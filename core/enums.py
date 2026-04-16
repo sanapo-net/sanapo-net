@@ -17,9 +17,9 @@ class ShutdownTier(int, Enum):
 
 @unique
 class SpeedShiftICMP(int, Enum):
-    LOW  = 1
-    NORM = 0
-    FAST = -1
+    SLOWER = 1
+    NORMAL = 0   
+    FASTER = -1
 
 @unique
 class Priority(int, Enum):

@@ -8,7 +8,7 @@ class Config():
     BUS_READ_LIMIT = 100
     CORE_TICK_RATE = 0.0025 # seconds
 
-    # For buffer
+    # For icmp buffer
     BUF_ICMP_SPARE_COLS_MAX = 150
     BUF_ICMP_SPARE_COLS_TARGET = 100
     BUF_ICMP_MIN_PER_SAMPLES_10M_DB = 40  # %
@@ -17,15 +17,18 @@ class Config():
     BUF_ICMP_MIN_PER_SAMPLES_1M = 90      # %
     BUF_ICMP_MIN_PER_SAMPLES_DEFAULT = 90 # %
 
-    # For scanner
-    SCAN_ICMP_TIMEOUT_MARGIN = { # seconds
+    # For icmp scanner
+    SCAN_ICMP_TIMEOUT_MIN_MARGIN = { # seconds
         TickInterval.SEC_05: 0.1,
         TickInterval.SEC_1: 0.1,
-        TickInterval.SEC_2: 0.15,
-        TickInterval.SEC_4: 0.15,
-        TickInterval.SEC_8: 0.2,
-        TickInterval.SEC_24: 0.2,
+        TickInterval.SEC_2: 0.2,
+        TickInterval.SEC_4: 0.4,
+        TickInterval.SEC_8: 0.8,
+        TickInterval.SEC_24: 3.2,
     }
+    ICMP_SCAN_QUEUE_THRESHOLD = 20
+    ICMP_SCAN_QUEUE_MAX = 30
+
     # For the Logger
     DEFAULT_LOG_FLAGS = {
         "console": [Logs.CRIT, Logs.ERR, Logs.WRN, Logs.INFO, Logs.DEBUG],
