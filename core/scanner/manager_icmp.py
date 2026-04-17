@@ -15,8 +15,10 @@ from core.scanner.scanner_icmp import ScannerICMP
 from core.secretary import Secretary
 from core.logger import Logger
 
-
-# TODO sorting!
+DeviceData    = dict
+DeviceList    = list[DeviceData]
+TimeoutGroups = dict[float, DeviceList]
+IntervalMap   = dict[TickInterval, TimeoutGroups]
 
 class ManagerICMP():
     def __init__(self, tools: Tools, secr: Secretary, logger: Logger) -> None:
@@ -31,9 +33,13 @@ class ManagerICMP():
         min_interval = TickInterval.SEC_05.value
         max_interval = TickInterval.SEC_8.value
         self._intervals = [t for t in TickInterval if min_interval <= t.value <= max_interval]
+
         self._speed_shift: SpeedShiftICMP = SpeedShiftICMP.NORMAL
         self._tick_schedule = self._prepare_schedule()
-        self._scan_profiles: dict[SpeedShiftICMP, dict[TickInterval, list[dict[str, any]]]] = None
+        self._scan_profiles: dict[SpeedShiftICMP, IntervalMap] = None
+        self._uids_by_latency: list[int] = None
+
+
         print(json.dumps(self._tick_schedule, indent=4, default=str)) # TODO del it in realise
 
         self._secr.configure_subscriptions(events={
@@ -117,16 +123,10 @@ class ManagerICMP():
             return current_tick
 
     def _get_scan_profiles_by_net_tab(self, tab: dict[int, dict[str, Any]]) -> None:
-        """
-        Groups devices from the network table by their scan intervals.
-        Args: tab: Dictionary where key is UID and value is device data.
-        Returns: Dictionary where key is TickInterval and value is a list of device dicts.
-        """
-        # init
-        self._scan_profiles = {s: defaultdict(list) for s in SpeedShiftICMP}
+        # 1. Init nested defaultdict: Mode -> Interval -> Timeout -> []
+        self._scan_profiles = {s: defaultdict(lambda: defaultdict(list)) for s in SpeedShiftICMP}
         
         for uid, dev_data in tab.items():
-            # Retrieve the interval object (TickInterval)
             orig_interval = dev_data.get("icmp_interval")
             if not isinstance(orig_interval, TickInterval):
                 self._log.err(f"Invalid icmp_interval for uid:{uid}")
@@ -134,31 +134,31 @@ class ManagerICMP():
 
             base_timeout = dev_data.get("timeout",self._tools.settings.scan.timeouts[orig_interval])
             
-            # Data for NORMAL, SLOWER interval
+            # --- NORMAL & SLOWER ---
             margin_norm = self._tools.config.SCAN_ICMP_TIMEOUT_MIN_MARGIN[orig_interval]
             timeout_norm = min(base_timeout, orig_interval.value - margin_norm)
-            data_norm = {
-                "uid": dev_data["uid"],
-                "ip": dev_data["ip"],
-                "timeout": timeout_norm,
-            }
-            self._scan_profiles[SpeedShiftICMP.NORMAL][orig_interval].append(data_norm)
-            self._scan_profiles[SpeedShiftICMP.SLOWER][orig_interval].append(data_norm)
+            data_norm = {"uid": uid, "ip": dev_data["ip"], "timeout": timeout_norm}
+            
+            target_list = self._scan_profiles[SpeedShiftICMP.NORMAL][orig_interval][timeout_norm]
+            target_list.append(data_norm)
+            target_list = self._scan_profiles[SpeedShiftICMP.SLOWER][orig_interval][timeout_norm]
+            target_list.append(data_norm)
 
-            # Data for FASTER interval
+            # --- FASTER ---
             fast_interval = self._shift_interval(orig_interval, SpeedShiftICMP.FASTER)
             margin_fast = self._tools.config.SCAN_ICMP_TIMEOUT_MIN_MARGIN[fast_interval]
             timeout_fast = min(base_timeout, fast_interval.value - margin_fast)
-            data_fast = {
-                "uid": dev_data["uid"],
-                "ip": dev_data["ip"],
-                "timeout": timeout_fast,
-            }
-            self._scan_profiles[SpeedShiftICMP.FASTER][orig_interval].append(data_fast)
+            data_fast = {"uid": uid, "ip": dev_data["ip"], "timeout": timeout_fast}
+            
+            target_list = self._scan_profiles[SpeedShiftICMP.FASTER][orig_interval][timeout_fast]
+            target_list.append(data_fast)
         
+        # 2. Cleanup: convert to standard dicts
         for mode in self._scan_profiles:
-            self._scan_profiles[mode] = dict(self._scan_profiles[mode])
-
+            self._scan_profiles[mode] = {
+                interval: dict(timeouts) 
+                for interval, timeouts in self._scan_profiles[mode].items()
+            }
 
     def _sort_scan_profiles(self) -> None:
         """sorts all lists in _scan_profiles by timeout and latency"""
@@ -216,37 +216,37 @@ class ManagerICMP():
             full_map[shift] = shift_map
             
         return full_map
-"""
-Generated `full_map` structure for intervals [0.5, 1.0, 2.0, 4.0, 8.0]:
-{
-    # --- FASTER (Groups shift to shorter intervals) ---
-    # Example: SEC_1 acts like SEC_05, SEC_8 acts like SEC_4
-    SpeedShiftICMP.FASTER: {
-        EvtType.TICK_05: [SEC_05, SEC_1],
-        EvtType.TICK_1:  [SEC_05, SEC_1, SEC_2],
-        EvtType.TICK_2:  [SEC_05, SEC_1, SEC_2, SEC_4],
-        EvtType.TICK_4:  [SEC_05, SEC_1, SEC_2, SEC_4, SEC_8],
-        EvtType.TICK_8:  [SEC_05, SEC_1, SEC_2, SEC_4, SEC_8]
-    },
+        """
+        Generated `full_map` structure for intervals [0.5, 1.0, 2.0, 4.0, 8.0]:
+        {
+            # --- FASTER (Groups shift to shorter intervals) ---
+            # Example: SEC_1 acts like SEC_05, SEC_8 acts like SEC_4
+            SpeedShiftICMP.FASTER: {
+                EvtType.TICK_05: [SEC_05, SEC_1],
+                EvtType.TICK_1:  [SEC_05, SEC_1, SEC_2],
+                EvtType.TICK_2:  [SEC_05, SEC_1, SEC_2, SEC_4],
+                EvtType.TICK_4:  [SEC_05, SEC_1, SEC_2, SEC_4, SEC_8],
+                EvtType.TICK_8:  [SEC_05, SEC_1, SEC_2, SEC_4, SEC_8]
+            },
 
-    # --- NORMAL (Standard 1:1 mapping) ---
-    # Groups trigger exactly on their physical time
-    SpeedShiftICMP.NORMAL: {
-        EvtType.TICK_05: [SEC_05],
-        EvtType.TICK_1:  [SEC_05, SEC_1],
-        EvtType.TICK_2:  [SEC_05, SEC_1, SEC_2],
-        EvtType.TICK_4:  [SEC_05, SEC_1, SEC_2, SEC_4],
-        EvtType.TICK_8:  [SEC_05, SEC_1, SEC_2, SEC_4, SEC_8]
-    },
+            # --- NORMAL (Standard 1:1 mapping) ---
+            # Groups trigger exactly on their physical time
+            SpeedShiftICMP.NORMAL: {
+                EvtType.TICK_05: [SEC_05],
+                EvtType.TICK_1:  [SEC_05, SEC_1],
+                EvtType.TICK_2:  [SEC_05, SEC_1, SEC_2],
+                EvtType.TICK_4:  [SEC_05, SEC_1, SEC_2, SEC_4],
+                EvtType.TICK_8:  [SEC_05, SEC_1, SEC_2, SEC_4, SEC_8]
+            },
 
-    # --- SLOWER (Groups shift to longer intervals) ---
-    # Example: SEC_05 acts like SEC_1, SEC_4 acts like SEC_8
-    SpeedShiftICMP.SLOWER: {
-        EvtType.TICK_05: [], 
-        EvtType.TICK_1:  [SEC_05],
-        EvtType.TICK_2:  [SEC_05, SEC_1],
-        EvtType.TICK_4:  [SEC_05, SEC_1, SEC_2],
-        EvtType.TICK_8:  [SEC_05, SEC_1, SEC_2, SEC_4, SEC_8] # SEC_8 is clamped here
-    }
-}
-"""
+            # --- SLOWER (Groups shift to longer intervals) ---
+            # Example: SEC_05 acts like SEC_1, SEC_4 acts like SEC_8
+            SpeedShiftICMP.SLOWER: {
+                EvtType.TICK_05: [], 
+                EvtType.TICK_1:  [SEC_05],
+                EvtType.TICK_2:  [SEC_05, SEC_1],
+                EvtType.TICK_4:  [SEC_05, SEC_1, SEC_2],
+                EvtType.TICK_8:  [SEC_05, SEC_1, SEC_2, SEC_4, SEC_8] # SEC_8 is clamped here
+            }
+        }
+        """
