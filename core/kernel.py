@@ -77,8 +77,7 @@ class Kernel:
         and registers the module for the shutdown sequence.
         """
         secr = self._get_secr(addr)
-        logger = Logger()
-        logger.set_secr(secr)
+        logger = Logger(secr=secr, conf=self._tools.config)
         secr.set_logger(logger)
         module = module_class(self._tools, secr, logger, *args, **kwargs)
         secr.set_module(module)

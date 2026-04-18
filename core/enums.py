@@ -71,7 +71,7 @@ class EvtType(str, Enum):
     WRN = "wrn"
     ERR = "err"
     LOG = "log"
-    ERR_LOGIC = "err_logic" # not users error
+    CRIT = "crit" # not users error
     # Kernel
     EVT_ADDR_DEREGISTER = "evt_addr_deregister"
     BUS_IS_OVERCROWDED = "bus_is_overcrowded"
