@@ -36,7 +36,8 @@ class RollWin(int, Enum):
 @unique
 class TickInterval(float, Enum):
     """Physical time constants in seconds."""
-    OFF      = -1
+    OFF      = -100.0
+    DEFAULT  = -1.0
     SEC_05   = 0.5
     SEC_1    = 1.0
     SEC_2    = 2.0

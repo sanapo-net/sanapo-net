@@ -37,6 +37,8 @@ class Config():
     ICMP_THREADS_MIN = 20
     ICMP_THREADS_MAX = 100
     ICMP_QUEUE_GROWTH_STEP = 15  # Queue threshold for pool scaling
+    ICMP_TIMEOUTS = [-1, 25, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000,
+                     1200, 1400, 1600, 1800, 2000, 3000, 4000, 5000, 6000, 7000]
 
     # For the Logger
     DEFAULT_LOG_FLAGS = {
