@@ -1,14 +1,13 @@
 # core/scanner/scanner_icmp.py
 from __future__ import annotations
-
 import socket
 import threading
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING
 
 from icmplib import multiping
 
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from core.config import Config
     from core.enums import TickInterval

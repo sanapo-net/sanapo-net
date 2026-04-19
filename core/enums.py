@@ -81,6 +81,7 @@ class EvtType(str, Enum):
     BUS_IS_OVERCROWDED = "bus_is_overcrowded"
     ERR_ADDR_UNKNOWN = "err_addr_unknown"
     NO_SUBSCRIBED_LESTENER = "no_subscribed_lestener"
+    APP_START = "app_start"
     TICK_05 = "tick_05"
     TICK_1 = "tick_1"
     TICK_2 = "tick_2"

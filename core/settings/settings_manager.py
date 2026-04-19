@@ -1,10 +1,10 @@
 # core/settings_manager.py
 from __future__ import annotations
+from typing import TYPE_CHECKING, Callable
 
 from core.enums import Addr
 from core.settings.settings_icmp import SettingsICMP
 
-from typing import TYPE_CHECKING, Callable
 if TYPE_CHECKING:
     from main import Tools
     from core.secretary import Secretary

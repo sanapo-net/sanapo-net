@@ -4,11 +4,11 @@ from core.enums import CmdType, Addr, TickInterval, Logs
 class Config():
     icmp_interval = 1000
     
-    # For the kernel
+    # Kernel
     BUS_READ_LIMIT = 100
     CORE_TICK_RATE = 0.0025 # seconds
 
-    # For icmp buffer
+    # BufferICMP
     BUF_ICMP_SPARE_COLS_MAX = 150
     BUF_ICMP_SPARE_COLS_TARGET = 100
     BUF_ICMP_MIN_PER_SAMPLES_10M_DB = 40  # %
@@ -17,7 +17,10 @@ class Config():
     BUF_ICMP_MIN_PER_SAMPLES_1M = 90      # %
     BUF_ICMP_MIN_PER_SAMPLES_DEFAULT = 90 # %
 
-    # For icmp scanner
+    # Network
+    NETWORK_TICK_SLA = 0.04 # seconds
+
+    # ManagerICMP, ScannerISMP
     SCAN_ICMP_TIMEOUT_MIN_MARGIN = { # seconds
         TickInterval.SEC_05: 0.1,
         TickInterval.SEC_1: 0.1,
@@ -40,14 +43,14 @@ class Config():
     ICMP_TIMEOUTS = [-1, 25, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000,
                      1200, 1400, 1600, 1800, 2000, 3000, 4000, 5000, 6000, 7000]
 
-    # For the Logger
+    # Logger
     DEFAULT_LOG_FLAGS = {
         "console": [Logs.CRIT, Logs.ERR, Logs.WRN, Logs.INFO, Logs.DEBUG],
         "file": [Logs.CRIT, Logs.ERR, Logs.WRN, Logs.INFO, Logs.DEBUG],
         "message": [Logs.CRIT, Logs.ERR, Logs.WRN, Logs.INFO, Logs.DEBUG],
     }
 
-    # For the Secretary
+    # Secretary
     DEFAULT_CMD_DEADLINE_ANSW = 0.05    # seconds
     DEFAULT_CMD_DEADLINE_DONE = 0.8     # seconds
     DEFAULT_TIME_EXTENSION = 0.5        # seconds

@@ -4,6 +4,7 @@ from __future__ import annotations
 import time
 import asyncio
 from queue import Queue, Empty
+from typing import TYPE_CHECKING
 
 from core.enums import Addr, MsgType, CmdType, EvtType, RptType, SysType, ShutdownTier
 from core.enums import AddressBusyError, UnknownAddressError
@@ -11,7 +12,6 @@ from core.protocol import Frame
 from core.secretary import Secretary
 from core.logger import Logger
 
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from main import Tools
     from core.config import Config

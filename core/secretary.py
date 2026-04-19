@@ -4,12 +4,12 @@ from __future__ import annotations
 import time
 import threading
 from queue import Empty
+from typing import TYPE_CHECKING, Callable
 
 from core import enums
 from core.protocol import Frame
 from core.logger import Logger
 
-from typing import TYPE_CHECKING, Callable
 if TYPE_CHECKING:
     from queue import Queue
     from main import Tools

@@ -2,17 +2,17 @@
 from __future__ import annotations
 
 import json # TODO del it in realise. It's for debug
+from typing import TYPE_CHECKING
 from typing import TypeAlias
 from collections import defaultdict
 from typing import Any
 
-from core.enums import EvtType, Priority, TickInterval, SpeedShiftICMP
+from core.enums import EvtType, TickInterval, SpeedShiftICMP
 from core.protocol import Frame
 from core.scanner.scanner_icmp import ScannerICMP
 from core.secretary import Secretary
 from core.logger import Logger
 
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from main import Tools
     from core.secretary import Secretary

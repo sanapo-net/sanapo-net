@@ -1,12 +1,11 @@
 # core/buffer_icmp.py
 from __future__ import annotations
-
 import numpy as np
 from threading import RLock
+from typing import TYPE_CHECKING
 
 from core.enums import EvtType, CmdType, RptType, RollWin, Metric, TickInterval, SanapoError
 
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from main import Tools
     from core.network.network_manager import NetworkSnapshot
