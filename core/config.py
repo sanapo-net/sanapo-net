@@ -26,8 +26,17 @@ class Config():
         TickInterval.SEC_8: 0.8,
         TickInterval.SEC_24: 3.2,
     }
-    ICMP_SCAN_QUEUE_THRESHOLD = 20
-    ICMP_SCAN_QUEUE_MAX = 30
+    ICMP_SCAN_QUEUE_THRESHOLD = 50 # if SCAN_QUEUE > ICMP_SCAN_QUEUE_THRESHOLD drop corrent task
+    ICMP_BATCH_SIZE_SMALL_NET = 15
+    ICMP_NET_SIZE_THRESHOLD = 500
+    ICMP_BATCH_CONFIG_LARGE = [
+        (10, 80),  # Top 20% (highest priority) -> batch size 10
+        (20, 50),  # Next 30% -> batch size 20
+        (50, 0)    # Remaining 50% (background/slow) -> batch size 50
+    ]
+    ICMP_THREADS_MIN = 20
+    ICMP_THREADS_MAX = 100
+    ICMP_QUEUE_GROWTH_STEP = 15  # Queue threshold for pool scaling
 
     # For the Logger
     DEFAULT_LOG_FLAGS = {

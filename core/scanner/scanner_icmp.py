@@ -1,36 +1,26 @@
 # core/scanner/scanner_icmp.py
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from core.config import Config
-    from core.enums import TickInterval
-
-from icmplib import multiping
+from __future__ import annotations
 
 import socket
 import threading
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 
+from icmplib import multiping
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from core.config import Config
+    from core.enums import TickInterval
 
 class ScannerICMP:
-    # TODO move it to config
-    BATCH_SIZE_SMALL_NET = 15
-    NET_SIZE_THRESHOLD = 500
-    BATCH_CONFIG_LARGE = [
-        (10, 80),  # Top 20% (highest priority) -> batch size 10
-        (20, 50),  # Next 30% -> batch size 20
-        (50, 0)    # Remaining 50% (background/slow) -> batch size 50
-    ]
-    THREADS_MIN = 20
-    THREADS_MAX = 100
-    QUEUE_GROWTH_STEP = 15  # Queue threshold for pool scaling
-
-    def __init__(self):
+    def __init__(self, config: "Config"):
+        self._config = config
         self._results = []
         self._lock = threading.Lock()
         
         # Dynamic thread management
-        self._current_max_workers = self.THREADS_MIN
+        self._current_max_workers = self._config.ICMP_THREADS_MIN
         self._executor = ThreadPoolExecutor(max_workers=self._current_max_workers)
 
         # Execution mode detection (Raw vs User)
@@ -109,21 +99,21 @@ class ScannerICMP:
     def _adjust_threads(self):
         """Dynamically expands the thread pool in case of congestion."""
         depth = self.get_queue_depth()
-        if depth > self.QUEUE_GROWTH_STEP and self._current_max_workers < self.THREADS_MAX:
-            self._current_max_workers = min(self.THREADS_MAX, self._current_max_workers + 10)
+        if depth > self._config.ICMP_QUEUE_GROWTH_STEP and self._current_max_workers < self._config.ICMP_THREADS_MAX:
+            self._current_max_workers = min(self._config.ICMP_THREADS_MAX, self._current_max_workers + 10)
             self._executor._max_workers = self._current_max_workers
             # Python 3.7+ supports auto changing max_workers
 
     def _get_dynamic_batch_size(self, current_count: int, total: int) -> int:
         """Calculates batch size based on dataset size and scanning progress."""
-        if total < self.NET_SIZE_THRESHOLD:
-            return self.BATCH_SIZE_SMALL_NET
+        if total < self._config.ICMP_NET_SIZE_THRESHOLD:
+            return self._config.ICMP_BATCH_SIZE_SMALL_NET
         
         percent_left = (current_count / total) * 100
-        for size, threshold in self.BATCH_CONFIG_LARGE:
+        for size, threshold in self._config.ICMP_BATCH_CONFIG_LARGE:
             if percent_left > threshold:
                 return size
-        return self.BATCH_SIZE_SMALL_NET
+        return self._config.ICMP_BATCH_SIZE_SMALL_NET
 
     def _ping_worker(self, batch: list, timeout: float):
         """Thread worker: fanning out packets and collecting responses."""

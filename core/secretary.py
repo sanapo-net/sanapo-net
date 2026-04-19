@@ -1,9 +1,5 @@
 # core/secretary.py
-from typing import TYPE_CHECKING, Callable
-if TYPE_CHECKING:
-    from queue import Queue
-    from main import Tools
-    from core.config import Config
+from __future__ import annotations
 
 import time
 import threading
@@ -12,6 +8,12 @@ from queue import Empty
 from core import enums
 from core.protocol import Frame
 from core.logger import Logger
+
+from typing import TYPE_CHECKING, Callable
+if TYPE_CHECKING:
+    from queue import Queue
+    from main import Tools
+    from core.config import Config
 
 # TODO now i dont like self._thread = threading.Thread(target=self._worker_loop, daemon=True)
 class Secretary:

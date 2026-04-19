@@ -1,4 +1,11 @@
 # core/buffer_icmp.py
+from __future__ import annotations
+
+import numpy as np
+from threading import RLock
+
+from core.enums import EvtType, CmdType, RptType, RollWin, Metric, TickInterval, SanapoError
+
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from main import Tools
@@ -7,11 +14,6 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
     from core.protocol import Frame
     from core.logger import Logger
-
-import numpy as np
-from threading import RLock
-
-from core.enums import EvtType, CmdType, RptType, RollWin, Metric, TickInterval, SanapoError
 
 class BufferICMP:
     """

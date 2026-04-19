@@ -1,24 +1,25 @@
 # core/kernel.py
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from main import Tools
+from __future__ import annotations
 
+import time
 import asyncio
 from queue import Queue, Empty
-import time
 
 from core.enums import Addr, MsgType, CmdType, EvtType, RptType, SysType, ShutdownTier
 from core.enums import AddressBusyError, UnknownAddressError
 from core.protocol import Frame
 from core.secretary import Secretary
-from core.config import Config
-from core.logger import Logger # TODO refact it
+from core.logger import Logger
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from main import Tools
+    from core.config import Config
 
 class Kernel:
     def __init__(self, tools: Tools) -> None:
         self._tools: Tools = tools
-        self._config: Config = Config()
-        self._log: Logger = Logger()
+        self._log: Logger = Logger(tools.config)
         
         self._is_running: bool = True
 
@@ -70,24 +71,30 @@ class Kernel:
             addr: Addr,
             module_class: type,
             tier: ShutdownTier,
+            need_for_secr: bool = True,
             *args, **kwargs
         ) -> any:
         """
         Factory method: creates a module, its secretary, its logger, binds them,
         and registers the module for the shutdown sequence.
         """
-        secr = self._get_secr(addr)
-        logger = Logger()
-        logger.set_secr(secr)
-        secr.set_logger(logger)
-        module = module_class(self._tools, secr, logger, *args, **kwargs)
-        secr.set_module(module)
-        self._module_reg[addr] = module
-        if tier not in self._shutdown_tiers:
-            self._shutdown_tiers[tier] = []
-        self._shutdown_tiers[tier].append(addr)
-        self._log.info(f"module {addr.name} registered (Tier: {tier.name}).")       
-        return module
+        if need_for_secr:
+            secr = self._get_secr(addr)
+            logger = Logger(self._tools.config, secr)
+            module = module_class(self._tools, logger, secr, *args, **kwargs)
+            secr.set_logger(logger)
+            secr.set_module(module)
+            self._module_reg[addr] = module
+            if tier not in self._shutdown_tiers:
+                self._shutdown_tiers[tier] = []
+            self._shutdown_tiers[tier].append(addr)
+            self._log.info(f"module {addr.name} created and registered (Tier: {tier.name}).")       
+            return module
+        else:
+            logger = Logger(addr, self._tools.config)
+            module = module_class(self._tools, logger, *args, **kwargs)
+            self._log.info(f"module {addr.name} created.")       
+            return module
 
     def _addr_deregister(self, addr: Addr) -> None:
         """Final cleanup: wipes the address from all registries and subscriptions."""

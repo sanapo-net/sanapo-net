@@ -1,13 +1,10 @@
 # core/scanner/manager_icmp.py
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from main import Tools
-    from core.secretary import Secretary
-    from core.network.network_manager import NetworkSnapshot
+from __future__ import annotations
 
+import json # TODO del it in realise. It's for debug
+from typing import TypeAlias
 from collections import defaultdict
 from typing import Any
-import json # TODO del it in realise. It's for debug
 
 from core.enums import EvtType, Priority, TickInterval, SpeedShiftICMP
 from core.protocol import Frame
@@ -15,10 +12,16 @@ from core.scanner.scanner_icmp import ScannerICMP
 from core.secretary import Secretary
 from core.logger import Logger
 
-DeviceData    = dict
-DeviceList    = list[DeviceData]
-TimeoutGroups = dict[float, DeviceList]
-IntervalMap   = dict[TickInterval, TimeoutGroups]
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from main import Tools
+    from core.secretary import Secretary
+    from core.network.network_manager import NetworkSnapshot
+
+DeviceData: TypeAlias    = dict
+DeviceList: TypeAlias    = list[DeviceData]
+TimeoutGroups: TypeAlias = dict[float, DeviceList]
+IntervalMap: TypeAlias   = dict[TickInterval, TimeoutGroups]
 
 class ManagerICMP():
     def __init__(self, tools: Tools, secr: Secretary, logger: Logger) -> None:

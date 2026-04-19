@@ -1,4 +1,4 @@
-# tests/core/stress_test/common.py
+# tests/common.py
 import random
 import pickle
 import os

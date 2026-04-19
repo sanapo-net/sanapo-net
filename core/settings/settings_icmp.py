@@ -1,9 +1,11 @@
 # core/settings/settings_icmp.py
+from __future__ import annotations
+
+from core.enums import TickInterval, Priority
+
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from main import Tools
-
-from core.enums import TickInterval, Priority
 
 class SettingsICMP:
     def __init__(self, tools: Tools) -> None:
