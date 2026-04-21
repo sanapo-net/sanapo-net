@@ -1,5 +1,11 @@
 # core/buffer_icmp.py
+from __future__ import annotations
+import numpy as np
+from threading import RLock
 from typing import TYPE_CHECKING
+
+from core.enums import EvtType, CmdType, RptType, RollWin, Metric, TickInterval, SanapoError
+
 if TYPE_CHECKING:
     from main import Tools
     from core.network.network_manager import NetworkSnapshot
@@ -7,11 +13,6 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
     from core.protocol import Frame
     from core.logger import Logger
-
-import numpy as np
-from threading import RLock
-
-from core.enums import EvtType, CmdType, RptType, RollWin, Metric, TickInterval, SanapoError
 
 class BufferICMP:
     """
@@ -440,7 +441,7 @@ class BufferICMP:
 
         # 4. Sorting
         # argsort returns indices that would sort the array
-        sorted_indices = np.argsort(p50)
+        sorted_indices = np.argsort(p50)[::-1]
 
         # 5. Map indices back to UIDs
         # Reverse mapping {column_index: UID}

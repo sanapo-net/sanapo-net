@@ -1,11 +1,13 @@
 # core/buffer/buffer_manager.py
+from __future__ import annotations
 from typing import TYPE_CHECKING, Callable
-if TYPE_CHECKING:
-    from main import Tools
-    from core.secretary import Secretary
 
 from core.enums import Addr
 from core.buffer.buffer_icmp import BufferICMP
+
+if TYPE_CHECKING:
+    from main import Tools
+    from core.secretary import Secretary
 
 class BufferManager:
     def __init__(self, tools: Tools, setup_module: Callable) -> None:

@@ -1,5 +1,6 @@
 # core/protocol.py
 from dataclasses import dataclass
+
 from core.enums import Addr, MsgType, EvtType, CmdType, SysType, RptType, MessageInitError
 
 @dataclass(frozen=True)
