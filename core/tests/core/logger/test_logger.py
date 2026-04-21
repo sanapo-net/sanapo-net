@@ -5,9 +5,9 @@ from core.protocol import Frame
 from core.tests.core.logger.mock_secretary import MockSecretary
 from core.logger import Logger
 from core.config import Config
-
+cfg = Config()
 secr = MockSecretary(Addr.KERNEL, "test")
-logger = Logger(Config)
+logger = Logger(Addr.KERNEL, cfg, secr)
 
 frame = Frame(
     msg_type = MsgType.COMMAND,
@@ -23,16 +23,11 @@ frame = Frame(
     time_ext_req = 15.9,
     reason = "6 + 7 = siiix seeeeven"
 )
-# Again set logger protection test
-cocknballs = 0
 
-for cocknballs in range(0, 2):
-    if cocknballs == 1:
-        logger = Logger(Config, secr)
-    logger.wrn("Im a warning", frame, "MSRDTPtescriw")
-    logger.info("Just information", frame, "MSRDPtTescriw")
-    logger.crit("im wanna eat some shit", frame, "MSRDPtTescriw")
-    logger.err("Im error, bro", frame, "MSRDPtTescriw")
-    logger.debug("Debugging yaaaa", frame, "MSRDPtTescriw")
+logger.wrn("Im a warning", frame)
+logger.info("Just information", frame, "MSRDPtTescriw")
+logger.crit("im wanna eat some shit", frame, "MSRDPtTescriw")
+logger.err("Im error, bro", frame, "MSRDPtTescriw")
+logger.debug("Debugging yaaaa", frame, "MSRDPtTescriw")
 
 

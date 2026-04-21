@@ -1,33 +1,29 @@
 # core/logger.py
+from __future__ import annotations
+
+import datetime
+import logging
+
+from core.enums import EvtType, Addr
+from core.protocol import Frame
+
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from core.secretary import Secretary
     from core.config import Config
 
-import datetime
-import logging
-
-from core.enums import EvtType
-from core.protocol import Frame
-
 class Logger:
-    def __init__(self, config: "Config", secr: "Secretary | None" = None):
-        # Recursion protection flag | Maybe add to flag matrix?
-        self._is_logging = True
+    def __init__(self, addr: Addr, config: Config, secr: Secretary | None = None):
+        # TODO Check in future: Recursion protection if will be some problems in Kernel and LoggerApp
         self.secr = secr
+        self.addr = addr
         self.cfg = config
         logging.basicConfig(level=logging.DEBUG, force=True, format='%(levelname)s:%(message)s')
 
     def _get_time(self):
         return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
 
-    def _output(self, level: EvtType, text: str, payload: dict = None, frame: Frame | None = None, mask: str = ""):
-        if frame and mask:
-            details = self._read_mapping(frame, mask)
-
-            if details:
-                text = f"{text} | {' '.join(details)}"
-
+    def _output(self, level: EvtType, text: str, frame: Frame | None = None, mask: str = ""):
         # Default color (white) for formated msg
         default_color = "\033[0m"
 
@@ -41,33 +37,47 @@ class Logger:
         }
 
         time_str = self._get_time()
+        
+        self.addr if self.addr else "UNKNOWN"
+        logging.info(f"Address name:{self.addr}")
+        formatted_msg = ""
+        if frame and not mask:
+            formatted_msg = f"[{time_str}] [{level}] [{self.addr}]: {text}."
+            bus_payload = {"frame": frame}
+            if frame.payload:
+                bus_payload.update(frame.payload)
+        elif frame and mask:
+            details = self._read_mapping(frame, mask)
+            if details:
+                text = f"{text} | {' '.join(details)}"
+            formatted_msg = f"[{time_str}] [{level}] [{self.addr}]: {text}."
+        elif not frame and mask:
+            logging.error("Frame is None")
+        else:
+            bus_payload = {"text": f"{text} | {level} | {time_str} | {self.addr}"}
 
-        addr_name = self.secr.address.name if hasattr(self.secr, 'address') else "UNKNOWN"
-            
-        formatted_msg = f"[{time_str}] [{addr_name}] [{level}]: {text}"
 
-        if not self._is_logging: return
 
-        if self.cfg.DEFAULT_LOG_FLAGS["console"]:
+
+        if level in self.cfg.DEFAULT_LOG_FLAGS["console"]:
             output_vars[level][1](f"{output_vars[level][0]} {formatted_msg}.{default_color}")
-        if self.cfg.DEFAULT_LOG_FLAGS["file"]:
+        if level in self.cfg.DEFAULT_LOG_FLAGS["file"]:
             with open("system.log", "a", encoding="utf-8") as f:
                 f.write(formatted_msg + "\n")
-        if self.cfg.DEFAULT_LOG_FLAGS["message"] and level in EvtType and self.secr:
-            bus_payload = {"msg": text}
-            if payload:
-                bus_payload.update(payload)
+        if level in self.cfg.DEFAULT_LOG_FLAGS["message"] and level in EvtType and self.secr:
+            bus_payload = {"text": frame.payload, "frame": frame}
+
+            if frame.payload:
+                bus_payload.update(frame.payload)
             try:
-                self.secr.send_evt(evt_type=level, payload=bus_payload)
+                self.secr._log_push(evt_type=level, payload=bus_payload)
             except Exception:
-                self._is_logging = False
+                pass
 
     # ---- Log executing ----
     
-    def _read_mapping(self, frame: Frame | None = None, mask: str = "") -> list:
-        """
-        Read mask and return formated msg 
-        """
+    def _read_mapping(self, frame: Frame, mask: str = "") -> list:
+        """ Read mask and return formated msg """
         details = []
         mapping = {
             "M": f"{frame.msg_type} | ",
@@ -90,16 +100,16 @@ class Logger:
         return details
 
     def err(self, text: str, frame: Frame | None = None, mask: str = "") -> None:
-        self._output(EvtType.ERR, text, None, frame, mask)
+        self._output(level=EvtType.ERR, text=text, frame=frame, mask=mask)
 
-    def crit(self, text: str, frame: Frame | None = None, mask: str = "") -> None:
-        self._output(EvtType.CRIT, text, None, frame, mask)
+    def crt(self, text: str, frame: Frame | None = None, mask: str = "") -> None:
+        self._output(EvtType.CRIT, text=text, frame=frame, mask=mask)
 
     def wrn(self, text: str, frame: Frame | None = None, mask: str = "") -> None:
-        self._output(EvtType.WRN, text, None, frame, mask)
+        self._output(EvtType.WRN, text=text, frame=frame, mask=mask)
 
-    def info(self, text: str, frame: Frame | None = None, mask: str = "") -> None:
-        self._output(EvtType.MSG, text, None, frame, mask)
+    def inf(self, text: str, frame: Frame | None = None, mask: str = "") -> None:
+        self._output(EvtType.MSG, text=text, frame=frame, mask=mask)
 
-    def debug(self, text: str, frame: Frame | None = None, mask: str = "") -> None:
-        self._output(EvtType.LOG, text, None, frame, mask)
+    def dbg(self, text: str, frame: Frame | None = None, mask: str = "") -> None:
+        self._output(EvtType.LOG, text=text, frame=frame, mask=mask)
