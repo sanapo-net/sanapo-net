@@ -22,7 +22,7 @@ class SpeedShiftICMP(int, Enum):
     FASTER = -1
 
 @unique
-class Priority(int, Enum):
+class Priority(str, Enum):
     HIGH  = "high"
     MEDIUM  = "medium"
     LOW = "low"
@@ -75,7 +75,7 @@ class EvtType(str, Enum):
     WRN = "wrn"
     ERR = "err"
     LOG = "log"
-    ERR_LOGIC = "err_logic" # not users error
+    CRIT = "crt" # not users error
     # Kernel
     EVT_ADDR_DEREGISTER = "evt_addr_deregister"
     BUS_IS_OVERCROWDED = "bus_is_overcrowded"

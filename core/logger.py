@@ -1,127 +1,115 @@
 # core/logger.py
-# This is draft of core/logger
-# TODO move to config ?
-# TODO for modules without secr, comfortable params
+from __future__ import annotations
+
 import datetime
 import logging
 
-from core.enums import EvtType
-from core.secretary import Secretary
+from core.enums import EvtType, Addr
 from core.protocol import Frame
 
-class Logger:
-    def __init__(self, secr: Secretary, console: bool = True, bus: bool = True):
-        self.secr = secr
-        # Flag matrix
-        self.flags = {
-            "CONSOLE": console,
-            "SEND_EVT": bus,
-            "FILE": True
-        }
-        # The levels put in the bus
-        self.bus_levels = {
-            "ERR": EvtType.ERR,
-            "WRN": EvtType.WRN,
-            "INFO": EvtType.LOG
-        }
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from core.secretary import Secretary
+    from core.config import Config
 
-    def set_secr(self, secr: Secretary) -> None:
-        if self._secr is None and isinstance(secr, Secretary):
-            self._secr = secr
-            self._address = secr.address
-        else:
-            pass # TODO fix err vet
+class Logger:
+    def __init__(self, addr: Addr, config: Config, secr: Secretary | None = None):
+        # TODO Check in future: Recursion protection if will be some problems in Kernel and LoggerApp
+        self.secr = secr
+        self.addr = addr
+        self.cfg = config
+        logging.basicConfig(level=logging.DEBUG, force=True, format='%(levelname)s:%(message)s')
 
     def _get_time(self):
-        return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
 
-    def _output(self, level: str, text: str, payload: dict = None):
+    def _output(self, level: EvtType, text: str, frame: Frame | None = None, mask: str = ""):
+        # Default color (white) for formated msg
+        default_color = "\033[0m"
+
+        # Variables that need to get by same key | Color/logging level
+        output_vars = {
+            EvtType.ERR: ["\033[31m", logging.error],
+            EvtType.CRIT: ["\033[31m", logging.critical],
+            EvtType.WRN: ["\033[33m", logging.warning],
+            EvtType.MSG: ["\033[0m", logging.info],
+            EvtType.LOG: ["\033[90m", logging.debug],
+        }
+
         time_str = self._get_time()
         
-        addr_name = self.secr.address.name if hasattr(self.secr, 'address') else "UNKNOWN"
-        
-        formatted_msg = f"[{time_str}] [{addr_name}] [{level}]: {text}"
+        self.addr if self.addr else "UNKNOWN"
+        logging.info(f"Address name:{self.addr}")
+        formatted_msg = ""
+        if frame and not mask:
+            formatted_msg = f"[{time_str}] [{level}] [{self.addr}]: {text}."
+            bus_payload = {"frame": frame}
+            if frame.payload:
+                bus_payload.update(frame.payload)
+        elif frame and mask:
+            details = self._read_mapping(frame, mask)
+            if details:
+                text = f"{text} | {' '.join(details)}"
+            formatted_msg = f"[{time_str}] [{level}] [{self.addr}]: {text}."
+        elif not frame and mask:
+            logging.error("Frame is None")
+        else:
+            bus_payload = {"text": f"{text} | {level} | {time_str} | {self.addr}"}
 
-        if self.flags["CONSOLE"]:
-            print(formatted_msg)
-        if self.flags["FILE"]:
+
+
+
+        if level in self.cfg.DEFAULT_LOG_FLAGS["console"]:
+            output_vars[level][1](f"{output_vars[level][0]} {formatted_msg}.{default_color}")
+        if level in self.cfg.DEFAULT_LOG_FLAGS["file"]:
             with open("system.log", "a", encoding="utf-8") as f:
                 f.write(formatted_msg + "\n")
-        if self.flags["SEND_EVT"] and level in self.bus_levels:
-            evt = self.bus_levels[level]
-            bus_payload = {"msg": text}
-            if payload:
-                bus_payload.update(payload)
+        if level in self.cfg.DEFAULT_LOG_FLAGS["message"] and level in EvtType and self.secr:
+            bus_payload = {"text": frame.payload, "frame": frame}
+
+            if frame.payload:
+                bus_payload.update(frame.payload)
             try:
-                self.secr.send_evt(evt_type=evt, payload=bus_payload)
+                self.secr._log_push(evt_type=level, payload=bus_payload)
             except Exception:
                 pass
+
+    # ---- Log executing ----
     
-    def crit(self, text: str, **kwargs):  self._output("CRITICAL", text, kwargs)
-    def err(self, text: str, **kwargs):   self._output("ERR", text, kwargs)
-    def wrn(self, text: str, **kwargs):   self._output("WRN", text, kwargs)
-    def info(self, text: str, **kwargs):  self._output("INFO", text, kwargs)
-    def debug(self, text: str):           self._output("DEBUG", text)
-
-# Example how use into module
-# self.log = SmartLogger(self.secretary)
-# TODO add "." to every text
-# TODO dont remember: logger must can work in "without secretary mode"
-# TODO self._log.info(text, frame, "MSRPDTtescriw")
-"""
-===MAP OF CHARS:===
-M Frame.msg_type 
-S Frame.sender
-R Frame.recipient
-P Frame.payload["text"]
-D Frame.deadline
-T Frame.time_ext_req
-t Frame.evt_type or sys_type or cmd_type or rpt_type (subType)
-e Frame.evt_type
-s Frame.sys_type
-c Frame.cmd_type
-r Frame.rpt_type
-i Frame.cmd_id
-w Frame.reason # Why ?
-add to text 
-
-def err(self, text: str, frame: Any = None, mask: str = ""):
-    if frame and mask:
+    def _read_mapping(self, frame: Frame, mask: str = "") -> list:
+        """ Read mask and return formated msg """
         details = []
         mapping = {
-            "S": f"From:{frame.sender.name}",
-            "r": f"Type:{frame.rpt_type.value if frame.rpt_type else 'N/A'}",
-            "i": f"ID:{frame.cmd_id}",
-            "e": f"Evt:{frame.evt_type.value if frame.evt_type else 'N/A'}",
+            "M": f"{frame.msg_type} | ",
+            "S": f"From:{frame.sender.name} |",
+            "R": f"Recipient:{frame.recipient} | ",
+            "P": f"Payload:{frame.payload['text'] if (frame.payload) else 'N/А'} |",
+            "D": f"Deadline:{frame.deadline} |",
+            "T": f"Exit time:{frame.time_ext_req} |",
+            "t": f"{frame.evt_type or frame.sys_type or frame.cmd_type or frame.rpt_type} |",
+            "e": f"Evt:{frame.evt_type.value if frame.evt_type else 'N/A'} |",
+            "s": f"Sys:{frame.sys_type.value if frame.sys_type else 'N/A'} |",
+            "c": f"Cmd:{frame.cmd_type.value if frame.cmd_type else 'N/A'} |",
+            "r": f"Rtp:{frame.rpt_type.value if frame.rpt_type else 'N/A'} |",
+            "i": f"ID:{frame.cmd_id} |",
+            "w": f"Reason:{frame.reason} |",
         }
         for char in mask:
             mapping.get(char)
             details.append(mapping[char])
-        if details:
-            text = f"{text} | {' '.join(details)}"
-    self._output("ERR", text)
-"""
+        return details
 
-# TODO make to logging for secont set_secr()
-"""
-    def set_module(self, module: any) -> None:
-        if self._module is not None:
-            self._module = module
-        else:
-            self._log.err(f"Detected second module set! Obj: {module}")
-"""
-# TODO protect against recursion 
-# (logging of sending error is logged by sending, but the error and .... loop)
-"""
-    def __init__(self, secretary):
-        self.secr = secretary
-        self._is_logging = False # flag protection
+    def err(self, text: str, frame: Frame | None = None, mask: str = "") -> None:
+        self._output(level=EvtType.ERR, text=text, frame=frame, mask=mask)
 
-    def _output(self, level, text, payload=None):
-        if getattr(self, '_is_logging', False): return # flag protection
-        try:
-            self._is_logging = True
-            # ... output logic ...
-        finally:
-            self._is_logging = False
-"""
+    def crt(self, text: str, frame: Frame | None = None, mask: str = "") -> None:
+        self._output(EvtType.CRIT, text=text, frame=frame, mask=mask)
+
+    def wrn(self, text: str, frame: Frame | None = None, mask: str = "") -> None:
+        self._output(EvtType.WRN, text=text, frame=frame, mask=mask)
+
+    def inf(self, text: str, frame: Frame | None = None, mask: str = "") -> None:
+        self._output(EvtType.MSG, text=text, frame=frame, mask=mask)
+
+    def dbg(self, text: str, frame: Frame | None = None, mask: str = "") -> None:
+        self._output(EvtType.LOG, text=text, frame=frame, mask=mask)
