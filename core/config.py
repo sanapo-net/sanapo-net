@@ -79,3 +79,5 @@ class Config():
         Falls back to DEFAULT_CMD_DEADLINE_DONE if not in SLA.
         """
         return self.CMD_SLA.get(cmd_type, self.DEFAULT_CMD_DEADLINE_DONE)
+    
+    MODULE_TICK_TCT_DEFAULT = 0.02 # Target Cycle Time, Seconds

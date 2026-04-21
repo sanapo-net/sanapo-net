@@ -44,8 +44,8 @@ class Secretary:
         self._inbox: Queue = inbox      # Read-only queue from Kernel
         self._outbox: Queue = outbox    # Write-only queue to Kernel
         self._config: Config = tools.config
-
-        self.has_thread_pool: bool = False  # Set to True by module if it uses own thread
+        # TODO check it
+        self._has_thread_pool: bool = False  # Set to True by module if it uses own thread
 
         self._cmd_counter: int = 0
         self._handlers_cmd: dict[enums.CmdType, Callable] = {}
