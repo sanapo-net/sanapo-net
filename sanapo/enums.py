@@ -33,11 +33,6 @@ class MsgType(str, Enum):
 class SysType(str, Enum):
     """SystemType for the shared bus"""
     APP_SHUTDOWN = "app_shutdown"
-    UNIT_STOP = "unit_stop"
-    UNIT_SHUTDOWN = "unit_shutdown"
-    UNIT_HALTED = "unit_halted"
-    UNIT_SLEEP = "unit_sleep"
-    UNIT_WAKEUP = "unit_wakeup"
     ADDR_DEREGISTER  = "addr_deregister"
     EVT_ADDR_DEREGISTER = "evt_addr_deregister"
     BUS_IS_OVERCROWDED = "bus_is_overcrowded"
@@ -45,7 +40,12 @@ class SysType(str, Enum):
     SUB = "sub"
     UNSUB = "unsub"
     SUB_SETUP = "sub_setup"
-    
+    # Units
+    U_START = "u_start"
+    U_SLEEP = "U_WAKEUP"
+    U_WAKEUP = "u_wakeup"
+    U_STOP = "u_stop"
+    U_DESTROY = "u_destroy"
 
 @unique
 class RptType(str, Enum):
@@ -69,12 +69,22 @@ class RptReason(str, Enum):
     NOT_IMPLEMENTED = "not_implemented"
 
 @unique
-class ModuleType(str, Enum):
-    UTILITY = "utility"   # Without loop, without Secretery:  mod+log
-    SIGMA = "sigma"       # With loop, without Secretery:  mod_loop+log
-    ZOMBIE = "zombie"     # Controlled by Secretery (via callbacks):  mod+secr_loop+log
-    TICKABLE = "tickable" # Without loop, Secretery has loop, calls step():  mod_step+secr_loop+log
-    MASTER = "master"     # Calls secr.step() from own loop:  mod_loop+secr+log
+class UnitType(str, Enum):
+    UTILITY = "utility"   # Without loop, without Secretery:  mod + log
+    SIGMA = "sigma"       # With loop, without Secretery:  mod_step + log
+    ZOMBIE = "zombie"     # Controlled by Secretery (via callbacks):  mod + secr_step + log
+    TICKABLE = "tickable" # Without loop, Secretery has loop, calls step():  mod_step + secr_step + log
+
+@unique
+class UnitStat(str, Enum):
+    READY = "ready"
+    STARTING = "starting"
+    WORKING = "stopping"
+    SLEEPING = "STOPPING"
+    STOPPING = "stopping"
+    STOPPED = "stopped"
+    HALTED = "halted"
+
 
 
 class SanapoError(Exception): pass
