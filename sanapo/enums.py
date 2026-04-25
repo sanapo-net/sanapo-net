@@ -79,14 +79,20 @@ class UnitType(str, Enum):
 class UnitStat(str, Enum):
     READY = "ready"
     STARTING = "starting"
-    WORKING = "stopping"
-    SLEEPING = "STOPPING"
+    WORKING = "working"
+    SLEEPING = "sleeping"
     STOPPING = "stopping"
     STOPPED = "stopped"
     HALTED = "halted"
+    DESTROYED = "destroyed"
 
-
+class ThreadType(Enum):
+    TICKABLE = 0          # Active working thread
+    EVENT_DRIVEN = 1      # Guest-friendly club (Zombie/Utility)
+    ONLY_EVENT_DRIVEN = 2 # Strict VIP club (No Tickables allowed)
 
 class SanapoError(Exception): pass
 class ModuleAddressError(SanapoError): pass
 class MessageInitError(SanapoError): pass
+class ClubAccessError(Exception): pass
+class UnitMutationError(Exception): pass

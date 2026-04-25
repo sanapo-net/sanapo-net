@@ -19,8 +19,13 @@ Addr = Enum
 
 class Logger:
     _print_lock = threading.Lock()
-    def __init__(self, addr: Addr, config: Config):
-        self._addr = addr
+    def __init__(self, addr: Addr | str, config: Config):
+        if isinstance(addr, Addr):
+            self._addr = addr.name
+        elif isinstance(addr, str):
+            self._addr = addr
+        else:
+            self._addr = "UNKNOWN"
         self._cfg = config
 
         self.file_handler = RotatingFileHandler(
@@ -45,9 +50,8 @@ class Logger:
             trc_str = f" ({filename}:{lineno})"
 
         time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        addr = self._addr.name if self._addr else "UNKNOWN"
         msk_str = self._read_mapping(frame, mask)
-        log_str = f"{time_str} {level.value} {addr}: {text}{trc_str}{msk_str}."
+        log_str = f"{time_str} {level.value} {self._addr}: {text}{trc_str}{msk_str}."
 
         # Console
         if level in self._cfg.DEFAULT_LOG_FLAGS["console"]:
@@ -59,7 +63,7 @@ class Logger:
         # File (string)
         if level in self._cfg.DEFAULT_LOG_FLAGS["file"]:
             self.file_handler.emit(logging.LogRecord(
-                addr, logging.INFO, "", 0, log_str, None, None
+                self._addr, logging.INFO, "", 0, log_str, None, None
             ))
 
         # Message (json)

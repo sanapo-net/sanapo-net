@@ -28,3 +28,13 @@ class Config():
     DEADLINE_EXTENSION_THRESHOLD = 0.3  # seconds
     SECRETARY_TICK_TCT_DEFAULT = 0.025  # seconds
     MODULE_TICK_TCT_DEFAULT = 0.02 # Target Cycle Time, Seconds
+
+    # ThreadManager
+    THREAD_TCT_DEFAULT = 0.02
+    THREAD_TCT_HIBERNATE_DEFAULT = 0.1
+    THREAD_JOIN_MARGIN = 2
+    FPS_MODE = True
+    HIBERNATE_MODE = True
+
+    # BaseUnit
+    UNIT_STOP_TIMEOUT = 2
