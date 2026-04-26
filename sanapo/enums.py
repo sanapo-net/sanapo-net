@@ -77,13 +77,15 @@ class UnitType(str, Enum):
 
 @unique
 class UnitStat(str, Enum):
-    READY = "ready"
+    CREATING = "creating"
+    CREATED = "created"
     STARTING = "starting"
     WORKING = "working"
     SLEEPING = "sleeping"
     STOPPING = "stopping"
     STOPPED = "stopped"
     HALTED = "halted"
+    REBIRTHING = "rebirthing"
     DESTROYED = "destroyed"
 
 class ThreadType(Enum):

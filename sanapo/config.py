@@ -32,9 +32,14 @@ class Config():
     # ThreadManager
     THREAD_TCT_DEFAULT = 0.02
     THREAD_TCT_HIBERNATE_DEFAULT = 0.1
+    THREAD_STEP_TIMEOUT_MARGIN = 1
     THREAD_JOIN_MARGIN = 2
     FPS_MODE = True
     HIBERNATE_MODE = True
 
     # BaseUnit
     UNIT_STOP_TIMEOUT = 2
+    UNIT_STEP_TIMEOUT = 0.2
+
+    # WatchDog
+    WATCHDOG_TCT = 1

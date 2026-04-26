@@ -28,8 +28,8 @@ class ThreadManager:
         self.name = name
         
         # Initial setup
-        self._init_type = type if type else ThreadType.EVENT_DRIVEN
-        self.type = self._init_type
+        self._init_type: ThreadType = type if type else ThreadType.EVENT_DRIVEN
+        self.type: ThreadType = self._init_type
         
         # Flags from config
         self._fps_mode = config.FPS_MODE
@@ -42,6 +42,8 @@ class ThreadManager:
             self.type = ThreadType.TICKABLE
 
         # Timing
+        self.last_step = perf_counter()
+        self.step_timeout
         self._margin = margin if margin is not None else config.THREAD_JOIN_MARGIN
         self._tct = tct if tct is not None else config.THREAD_TCT_DEFAULT
         # Hibernate TCT: must be longer or equal to normal TCT
@@ -58,32 +60,44 @@ class ThreadManager:
         self._cmd_queue = queue.Queue()
         self.fps = 0
 
-    def add_unit(self, unit: BaseUnit) -> None:
+    def add_unit(self, unit: BaseUnit) -> bool:
         """Adds unit with strict thread rules."""
+        # If unit already is in thread
+        if unit.addr in self._units:
+            self._logger.wrn(f"Addetion unit: {unit.addr} already in thread. Skipping")
+            return False
+    
         is_living = unit.type in [UnitType.TICKABLE, UnitType.SIGMA]
         
-        # Addtion SIGMA/TICKABLE to only ZOMBIE/UTILITY thread
+        # If Addition SIGMA/TICKABLE to only ZOMBIE/UTILITY thread
         if self._init_type == ThreadType.ONLY_EVENT_DRIVEN and is_living:
             raise ClubAccessError(
                 f"Thread '{self.name}' for ZOMBIE/UTILITY only, but "
                 f"there was an attempt to add unit '{unit.addr}' ({unit.type.name})"
             )
-        # Addtion SIGMA/TICKABLE to for ZOMBIE/UTILITY thread
+        # If Addition SIGMA/TICKABLE to for ZOMBIE/UTILITY thread
         if self.type == ThreadType.EVENT_DRIVEN and is_living:
             self._logger.wrn(f"Guest '{unit.addr}' (Tickable) is entering Event-Driven Thread.")
-            
+        
+        # Addition
         self._units[unit.addr] = unit
         if not self._thread:
             self._init_unit[unit.addr] = unit
         else:
             self._cmd_queue.put(('ADD', unit))
+        self._update_step_timeout()
+        return True
 
-    def remove_unit(self, addr: str):
-        if addr in self._units:
-            unit = self._units.pop(addr)
-            self._cmd_queue.put(('REMOVE', unit))
+    def remove_unit(self, addr: str) -> bool:
+        if addr not in self._units:
+            self._logger.wrn(f"Can't remove {addr}: not found")
+            return False
+        unit = self._units.pop(addr)
+        self._cmd_queue.put(('REMOVE', unit))
+        self._update_step_timeout()
+        return True
 
-    def start(self):
+    def start(self) -> None:
         """Starts all units, and starts thread"""
         self._stop_event.clear()
         # Create an "agent" (Runner) and give him a copy of the list of units
@@ -97,7 +111,7 @@ class ThreadManager:
         )
         self._thread.start()
 
-    def reload(self, mode: str = "current"):
+    def reload(self, mode: str = "current") -> None:
         """
         Restart modes:
         'initial' - only those that existed at creation
@@ -148,7 +162,7 @@ class ThreadManager:
         self._logger.inf(t)
         # Join process
         self._stop_event.set()
-        self.trigger_wakeup()
+        self.on_msg()
         self._thread.join(timeout)
         if self._thread.is_alive():
             self._logger.err(f"Thread {self.name} STUCK! Some units ignored stop signal.")
@@ -156,14 +170,13 @@ class ThreadManager:
         else:
             return True
 
-    # TODO Do i need auto-reboot for HALTED 
-    def _run_loop(self, units: list[BaseUnit]):
+    def _run_loop(self, units: list[BaseUnit]) -> None:
         """Main execution cycle."""
         active_units = units
         self._last_fps_calc = perf_counter()
         
         while not self._stop_event.is_set():
-            start_time = perf_counter()
+            self.last_step = start_time = perf_counter()
             tct = self._handle_commands(active_units)
 
             any_work_done = False
@@ -183,9 +196,9 @@ class ThreadManager:
                 try:
                     if unit.step(): any_work_done = True
                 except Exception as e:
-                    # TODO Do i need auto-reboot for HALTED 
                     unit.stat = UnitStat.HALTED
                     self._logger.err(f"Step-err in {unit.addr}: {e}")
+                    if unit in active_units: active_units.remove(unit)
             
             self._manage_thread_type(has_tickables)
             if self._fps_mode: self._calc_fps()
@@ -215,14 +228,32 @@ class ThreadManager:
                 
                 elif cmd == 'SET_TCT':
                     # Update local variable and class attribute
-                    self._runner_tct = val
+                    self._tct = val
                     return val
                     
         except Exception as e:
             self._logger.err(f"Command processing error in {self.name}: {e}")
-        return self._runner_tct
+        return self._tct
 
-    def _manage_thread_type(self, has_tickables: bool):
+    def _update_step_timeout(self) -> None:
+        """Recalculation of the time limit for one step (cycle) of the flow."""
+        units = [u for u in self._units.values() if u.stat == UnitStat.WORKING]
+        n = len(units)
+        if n == 0:
+            self.step_timeout = self._margin
+            return
+
+        # Engineering attenuation coefficient
+        k = 0.3 + 0.7 * (0.8 ** (n - 1))
+        
+        sum_timeouts = sum(u.step_timeout for u in units)
+        max_u_timeout = max(u.step_timeout for u in units)
+        
+        # The limit cannot be less than the longest unit + margin
+        calculated = sum_timeouts * k
+        self.step_timeout = max(calculated, max_u_timeout) + self._margin
+
+    def _manage_thread_type(self, has_tickables: bool) -> None:
         """Adjust type based on unit composition."""
         if has_tickables and self.type != ThreadType.TICKABLE:
             # A 'Living' unit entered a 'Lamp' club - uncomfortable but allowed
@@ -248,17 +279,16 @@ class ThreadManager:
             self._cycles = 0
             self._last_fps_calc = now
 
-    # TODO do i need it
     @property
     def can_be_awakened(self) -> bool:
         """Checks if the thread can be woken up by a lamp signal."""
         return self.type != ThreadType.TICKABLE or self._want_hibernate_mode
 
-    def on_msg(self):
+    def on_msg(self) -> None:
         """Signal from Kernel: a message has arrived for a unit in this thread."""
         self._wakeup_event.set()
 
-    def set_tct(self, new_tct: float):
+    def set_tct(self, new_tct: float) -> None:
         """Method for dynamically changing TCT without resetting the thread"""
         self.tct = new_tct
         self._cmd_queue.put(('SET_TCT', new_tct))

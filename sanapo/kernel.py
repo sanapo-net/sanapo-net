@@ -10,13 +10,14 @@ from typing import TYPE_CHECKING
 
 from sanapo.enums import MsgType, RptType, SysType, ShutdownTier, ModuleType, ModuleAddressError
 from sanapo.protocol import Frame
-from sanapo.secretary import Secretary
-from sanapo.logger import Logger
 from sanapo.config import Config
+from sanapo.logger import Logger
+from sanapo.secretary import Secretary
+from sanapo.base_unit import BaseUnit
 
 if TYPE_CHECKING:
-    from main import Tools
     from sanapo.config import Config
+    from sanapo.thread_manager import ThreadManager
 
 AddrClass = Type[Enum]
 EvtTypeClass = Type[Enum]
@@ -72,6 +73,16 @@ class Kernel:
         self._current_tier_idx: int = 0
         self._shutdown_tracker: dict[Addr, dict[str, any]] = {} # {'status':str, 'deadline':float}
         self._tiers_order: list[ShutdownTier] = list(ShutdownTier)
+
+    def get_managers(self) -> dict[str, ThreadManager]:
+        pass
+
+    def on_thread_stuck(self, manager: ThreadManager, delay: float) -> None:
+        pass
+
+    def on_unit_stuck(self, unit: BaseUnit, u_delay: float, manager: ThreadManager) -> None:
+        pass
+
 
     # --- Registrations ---
 
