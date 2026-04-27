@@ -8,16 +8,14 @@ from typing import Type
 from queue import Queue, Empty
 from typing import TYPE_CHECKING
 
-from sanapo.enums import MsgType, RptType, SysType, ShutdownTier, ModuleType, ModuleAddressError
+from sanapo.enums import MsgType, RptType, SysType, ShutdownTier, ModuleAddressError
 from sanapo.protocol import Frame
 from sanapo.config import Config
 from sanapo.logger import Logger
 from sanapo.secretary import Secretary
 from sanapo.base_unit import BaseUnit
-
-if TYPE_CHECKING:
-    from sanapo.config import Config
-    from sanapo.thread_manager import ThreadManager
+from sanapo.thread_manager import ThreadManager
+from sanapo.tier import Tier
 
 AddrClass = Type[Enum]
 EvtTypeClass = Type[Enum]
@@ -63,6 +61,7 @@ class Kernel:
         self._subscribers_cmd: dict[CmdType, set[Addr]] = {}
         
         self._is_running: bool = True
+        self._tct: float | None = -1.0
 
         # Start/Shutdown Orchestration/Registrations
         self._last_join_check: float = 0
@@ -82,6 +81,28 @@ class Kernel:
 
     def on_unit_stuck(self, unit: BaseUnit, u_delay: float, manager: ThreadManager) -> None:
         pass
+
+    def on_progress(self, text, ready, total) -> None:
+        pass
+
+    def rebuild_unit(self, unit: BaseUnit) -> None:
+        pass
+
+    def get_manager_by_unit(unit: BaseUnit) -> ThreadManager:
+        pass
+
+    def on_tier_start_fail(self, tier: Tier, problem_units: list[BaseUnit]) -> None:
+        pass
+
+    def on_tier_stop_fail(self, tier: Tier, problem_units: list[BaseUnit]) -> None:
+        pass
+
+    def on_tier_started(self, tier: Tier) -> None:
+        pass
+
+    def on_tier_stopped(self, tier: Tier) -> None:
+        pass
+
 
 
     # --- Registrations ---

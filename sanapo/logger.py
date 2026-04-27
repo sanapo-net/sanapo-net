@@ -19,7 +19,7 @@ Addr = Enum
 
 class Logger:
     _print_lock = threading.Lock()
-    def __init__(self, addr: Addr | str, config: Config):
+    def __init__(self, addr: Addr | str, config: Config) -> None:
         if isinstance(addr, Addr):
             self._addr = addr.name
         elif isinstance(addr, str):
@@ -53,20 +53,20 @@ class Logger:
         msk_str = self._read_mapping(frame, mask)
         log_str = f"{time_str} {level.value} {self._addr}: {text}{trc_str}{msk_str}."
 
-        # Console
+        # Console.
         if level in self._cfg.DEFAULT_LOG_FLAGS["console"]:
             c_bgn = COLORS.get(level.value, "")
             c_end = COLORS.get('end', "")
             with self._print_lock:
                 print(c_bgn + log_str + c_end)
                 
-        # File (string)
+        # File (string).
         if level in self._cfg.DEFAULT_LOG_FLAGS["file"]:
             self.file_handler.emit(logging.LogRecord(
                 self._addr, logging.INFO, "", 0, log_str, None, None
             ))
 
-        # Message (json)
+        # Message (json).
         if level in self._cfg.DEFAULT_LOG_FLAGS["message"] and frame:
             record = {"log": log_str, "raw": frame.to_dict()}
             path_file_jsonl = self._cfg.PATH_LOGS + "traffic.jsonl"

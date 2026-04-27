@@ -88,10 +88,40 @@ class UnitStat(str, Enum):
     REBIRTHING = "rebirthing"
     DESTROYED = "destroyed"
 
+@unique
 class ThreadType(Enum):
     TICKABLE = 0          # Active working thread
     EVENT_DRIVEN = 1      # Guest-friendly club (Zombie/Utility)
     ONLY_EVENT_DRIVEN = 2 # Strict VIP club (No Tickables allowed)
+
+@unique
+class ThreadStat(Enum):
+    CREATED = "created"
+    STARTING = "starting"
+    WORKING = "working"
+    RELOAD = "reload"
+    JOINING = "joining"
+    JOINED = "joined"
+
+class UnitSource(Enum): # WHERE TO TAKE FROM (Source of objects)
+    CURRENT = "current" # From active self._units dictionary
+    INITIAL = "initial" # From the original config/startup list
+
+class UnitSelection(Enum): # WHOM TO TAKE (Object state filter)
+    ALL = "all"         # Select everything
+    ALIVE = "alive"     # Only those whose thread is currently running
+    DEAD = "alive"      # Only those finished or crashed (not alive)
+    WORKING = "working" # Only those with 'WORKING' status
+
+class ExecutionStrategy(Enum): # WHOM TO START (Post-creation action)
+    NONE = "none"      # Create objects but do not call .start()
+    ALL = "all"        # Start all selected units
+    WORKING = "sync"      # Start only those that were running before the reload
+
+class TierTask(Enum):
+    NONE = "STARTING"
+    STARTING = "starting"
+    STOPPING = "stopping"
 
 class SanapoError(Exception): pass
 class ModuleAddressError(SanapoError): pass

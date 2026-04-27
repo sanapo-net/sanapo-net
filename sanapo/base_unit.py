@@ -35,11 +35,14 @@ class BaseUnit():
 
         self.stat: UnitStat = UnitStat.CREATING
 
-        self._stop_deadline: float | None = None
+        
         self._is_destroying: bool = False
         self._needs_rebirth = False
+        self._stop_deadline: float | None = None
+        self.start_timeout:float = getattr(self._module, 'start_timeout',config.UNIT_START_TIMEOUT) 
+        self.stop_timeout: float = getattr(self._module, 'stop_timeout', config.UNIT_STOP_TIMEOUT) 
+        self.step_timeout: float = getattr(module_class, 'step_timeout', config.UNIT_STEP_TIMEOUT)
         self._last_step: float = perf_counter()
-        self.step_timeout = getattr(module_class, 'step_timeout', config.UNIT_STEP_TIMEOUT)
         self._step_map = {
             UnitStat.WORKING: {
                 UnitType.UTILITY: [0,0],
@@ -61,9 +64,7 @@ class BaseUnit():
             SysType.U_STOP: self.stop,
             SysType.U_DESTROY: self.destroy,
         })
-
-        self.create_module()
-        self.stop_timeout: float = getattr(self._module, 'stop_timeout', self.config.UNIT_STOP_TIMEOUT)        
+        self.create_module()       
 
 
     def create_module(self):
@@ -87,7 +88,7 @@ class BaseUnit():
                     self._module.stop() 
                     self._module = None
                 else:
-                    # Soft stop. Creation only after STOPPED or stop_timeout
+                    # Soft stop. Creation only after STOPPED or stop_timeout.
                     self._needs_rebirth = True
                     self.stop()
                     self.stat = UnitStat.REBIRTHING 
@@ -95,7 +96,7 @@ class BaseUnit():
             except Exception as e:
                 self.logger.err(f"Error during module rebirthing: {e}")
 
-        # Create and start new module
+        # Create and start new module.
         self.create_module()
         if self.stat == UnitStat.CREATED:
             self.start()
@@ -112,7 +113,7 @@ class BaseUnit():
             if self._stop_deadline and now >= self._stop_deadline:
                 self.stat = UnitStat.STOPPED
                 self._stop_deadline = None
-                self.logger.inf(f"Unit {self.addr} forced to STOPPED by timeout")
+                self.logger.inf(f"Forced to STOPPED by timeout")
                 return False
         
         if self.stat == UnitStat.STOPPED:

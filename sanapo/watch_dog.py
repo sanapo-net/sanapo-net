@@ -25,18 +25,18 @@ class WatchDog:
         for manager in self.kernel.get_managers().values():
             delay = now - manager.last_step
             
-            # If the flow is delayed, but not yet critical
+            # If the flow is delayed, but not yet critical.
             margin = max(self.tct * 1.5, self.tct + manager._tct_hibernate)
             if delay > manager.step_timeout - margin:
                 # We give the manager a command to recheck their timeouts
-                # (in case the user raised them)
+                # (in case the user raised them).
                 manager._update_step_timeout()
                 
-            # Final check
+            # Final check.
             if delay > manager.step_timeout:
                 self.kernel.on_thread_stuck(manager, delay)
             else:
-                # Checking individual units within a live stream
+                # Checking individual units within a live stream.
                 for unit in manager._units.values():
                     if unit.stat == UnitStat.WORKING:
                         u_delay = now - unit._last_step
