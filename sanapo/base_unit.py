@@ -27,7 +27,7 @@ class BaseUnit():
         self.addr: Addr = addr
         self.type: UnitType = type
         self.logger: Logger = logger
-        self.secr: Secretary | None = secr
+        self.secr: Secretary = secr
 
         self._module: BaseModule | None = None
         self._module_class: any = module_class
@@ -57,27 +57,24 @@ class BaseUnit():
                 UnitType.TICKABLE: [1,0],
             }
         }
-        self.secr.configure_subscriptions(system={
-            SysType.U_START: self.start,
-            SysType.U_SLEEP: self.sleep,
-            SysType.U_WAKEUP: self.wakeup,
-            SysType.U_STOP: self.stop,
-            SysType.U_DESTROY: self.destroy,
-        })
         self.create_module()       
 
-
-    def create_module(self):
-        """Instantiates a module, passing it a reference to the container (self)."""
+    def create_module(self) -> bool:
+        """
+        Instantiates a module, passing it a reference to the container (self).
+        Returns True if module was created.
+        """
         try:
             # The module accesses everything through a single unit object.
             self._module = self._module_class(self, **self._module_params)
             self.stat = UnitStat.CREATED
+            return True
         except Exception as e:
             self.stat = UnitStat.HALTED
             self.logger.err(f"Failed to create module instance: {e}")
+            return False
 
-    def reborn_module(self, force: bool = False):
+    def restart_module(self, force: bool = False) -> bool:
         """Full restart of the module logic within the existing unit."""
         self.logger.inf(f"Rebirth of module in {self.addr} initiated (force={force})")
 
@@ -87,20 +84,22 @@ class BaseUnit():
                 if force:
                     self._module.stop() 
                     self._module = None
+                    return True
                 else:
                     # Soft stop. Creation only after STOPPED or stop_timeout.
                     self._needs_rebirth = True
                     self.stop()
                     self.stat = UnitStat.REBIRTHING 
-                    return
+                    return True
             except Exception as e:
                 self.logger.err(f"Error during module rebirthing: {e}")
+                return False
 
         # Create and start new module.
         self.create_module()
         if self.stat == UnitStat.CREATED:
             self.start()
-
+        return True
 
     def step(self) -> bool:
         now = perf_counter()
@@ -127,7 +126,7 @@ class BaseUnit():
         rules = self._step_map.get(self.stat, {}).get(self.type)
         was_work = False
         if rules:
-            if rules[0] and self.secr: self.secr.step()
+            if rules[0] and self.secr: self.secr._step()
             if rules[1] and self._module:
                 self._module.step()
                 was_work = True

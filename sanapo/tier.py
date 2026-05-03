@@ -66,7 +66,7 @@ class Tier:
     def _esc_reborn(self, unit: BaseUnit, now: float):
         """Attempt 1: Module restart."""
         self._logger.wrn(f"{unit.addr}: Slow start. Action: REBORN.")
-        unit.reborn_module(force=True)
+        unit.restart_module(force=True)
         self._attempts[unit.addr] = 1
         self._unit_start_times[unit.addr] = now
         t = f"Restarting Unit:{self.name}: {unit.addr}"

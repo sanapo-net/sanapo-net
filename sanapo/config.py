@@ -21,8 +21,7 @@ class Config():
     DEFAULT_CMD_DEADLINE_DONE = 0.8     # seconds
     DEFAULT_TIME_EXTENSION = 0.5        # seconds
     DEADLINE_EXTENSION_THRESHOLD = 0.3  # seconds
-    SECRETARY_TICK_TCT_DEFAULT = 0.025  # seconds
-    MODULE_TICK_TCT_DEFAULT = 0.02 # Target Cycle Time, Seconds
+    UNIT_BUS_READ_LIMIT = 20
 
     # ThreadManager.
     THREAD_TCT_DEFAULT = 0.02

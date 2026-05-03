@@ -33,19 +33,22 @@ class MsgType(str, Enum):
 class SysType(str, Enum):
     """SystemType for the shared bus"""
     APP_SHUTDOWN = "app_shutdown"
+    APP_RELOAD = "app_reload"
     ADDR_DEREGISTER  = "addr_deregister"
-    EVT_ADDR_DEREGISTER = "evt_addr_deregister"
     BUS_IS_OVERCROWDED = "bus_is_overcrowded"
-    # Subscribes
+    # Subscribes.
     SUB = "sub"
     UNSUB = "unsub"
     SUB_SETUP = "sub_setup"
-    # Units
+    # Units.
     U_START = "u_start"
-    U_SLEEP = "U_WAKEUP"
+    U_SLEEP = "u_sleep"
     U_WAKEUP = "u_wakeup"
     U_STOP = "u_stop"
     U_DESTROY = "u_destroy"
+    U_STEP = "u_step"
+    U_REBORN = "u_reborn"
+    U_MUTATE = "u_mutate"
 
 @unique
 class RptType(str, Enum):
