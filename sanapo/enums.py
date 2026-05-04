@@ -49,6 +49,8 @@ class SysType(str, Enum):
     U_STEP = "u_step"
     U_REBORN = "u_reborn"
     U_MUTATE = "u_mutate"
+    # Transport.
+    RAW = "raw"
 
 @unique
 class RptType(str, Enum):
@@ -106,25 +108,37 @@ class ThreadStat(Enum):
     JOINING = "joining"
     JOINED = "joined"
 
+@unique
 class UnitSource(Enum): # WHERE TO TAKE FROM (Source of objects)
     CURRENT = "current" # From active self._units dictionary
     INITIAL = "initial" # From the original config/startup list
 
+@unique
 class UnitSelection(Enum): # WHOM TO TAKE (Object state filter)
     ALL = "all"         # Select everything
     ALIVE = "alive"     # Only those whose thread is currently running
-    DEAD = "alive"      # Only those finished or crashed (not alive)
+    DEAD = "dead"      # Only those finished or crashed (not alive)
     WORKING = "working" # Only those with 'WORKING' status
 
+@unique
 class ExecutionStrategy(Enum): # WHOM TO START (Post-creation action)
     NONE = "none"      # Create objects but do not call .start()
     ALL = "all"        # Start all selected units
     WORKING = "sync"      # Start only those that were running before the reload
 
+@unique
 class TierTask(Enum):
-    NONE = "STARTING"
+    NONE = "none"
     STARTING = "starting"
     STOPPING = "stopping"
+
+@unique
+class TranspReadStat(Enum):
+    OK = "ok"
+    EMPTY = "empty"
+    CORRUPTED = "corrupted"
+    INCOMPLETE = "incomplete"
+    AUTH_FAILED = "auth_failed"
 
 class SanapoError(Exception): pass
 class ModuleAddressError(SanapoError): pass

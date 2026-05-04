@@ -4,10 +4,21 @@ from enum import Enum
 from typing import Type
 
 from sanapo.enums import MsgType, SysType, RptType, MessageInitError, RptReason
+from sanapo.addr import Addr
 
-Addr = Enum
 EvtType = Enum
 CmdType = Enum
+
+
+@dataclass
+class EnumRegistry:
+    addr: Type[Enum]
+    sys: Type[Enum]
+    evt: Type[Enum]
+    cmd: Type[Enum]
+    rpt: Type[Enum]
+    reason: Type[Enum]
+
 
 @dataclass(frozen=True)
 class Frame:
@@ -71,3 +82,6 @@ class Frame:
                 data["text"] = self.payload["text"]
             data["payload"] = self.payload 
         return data
+    
+    def from_dict(cls, data: dict, reg: EnumRegistry) -> 'Frame':
+        pass

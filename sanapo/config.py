@@ -38,3 +38,14 @@ class Config():
 
     # WatchDog.
     WATCHDOG_TCT = 1
+
+    # Translator
+    TRANSLATOR_DIR = 'languarges/'
+    UI_LANGUAGE = "en"
+
+    # Transport.
+    MAGIC_HEADER = 0x53616E61506F3130
+    TCP_PORT_DEFAULT = 5000
+    HANDSHAKE_TIMEOUT = 5.0
+    SYSTEM_NAME = 'SYSTEM_NAME_TEST'
+    HOST = '0.0.0.0'
