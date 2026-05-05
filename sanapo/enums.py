@@ -1,6 +1,11 @@
 # sanapo/enums.py
 from enum import Enum, IntEnum, unique
+from dataclasses import dataclass
+from typing import Type
 
+from sanapo.addr import Addr
+
+# Logger
 @unique
 class Logs(str, Enum):
     CRT = "crt"
@@ -9,6 +14,7 @@ class Logs(str, Enum):
     INF = "inf",
     DBG = "dbg"
 
+# Tier
 @unique
 class ShutdownTier(IntEnum):
     """
@@ -22,12 +28,18 @@ class ShutdownTier(IntEnum):
     APPLICATION = 4  # Main business logic.
     EXTENSION = 5    # High-level plugins and UI. Start last, stop first.
 
+class TierTask(Enum):
+    NONE = "none"
+    STARTING = "starting"
+    STOPPING = "stopping"
+
+# Protocol
 @unique
 class MsgType(str, Enum):
-    COMMAND = "cmd"
-    REPORT = "rpt"
-    EVENT = "evt"
-    SYSTEM = "system"
+    CMD = "cmd"
+    RPT = "rpt"
+    EVT = "evt"
+    SYS = "sys"
 
 @unique
 class SysType(str, Enum):
@@ -36,11 +48,11 @@ class SysType(str, Enum):
     APP_RELOAD = "app_reload"
     ADDR_DEREGISTER  = "addr_deregister"
     BUS_IS_OVERCROWDED = "bus_is_overcrowded"
-    # Subscribes.
+    # Subscribes
     SUB = "sub"
     UNSUB = "unsub"
     SUB_SETUP = "sub_setup"
-    # Units.
+    # Units
     U_START = "u_start"
     U_SLEEP = "u_sleep"
     U_WAKEUP = "u_wakeup"
@@ -49,7 +61,7 @@ class SysType(str, Enum):
     U_STEP = "u_step"
     U_REBORN = "u_reborn"
     U_MUTATE = "u_mutate"
-    # Transport.
+    # Transport
     RAW = "raw"
 
 @unique
@@ -73,6 +85,7 @@ class RptReason(str, Enum):
     INTERNAL_ERROR = "INTERNAL_ERROR"   # Unhandled exception in module
     NOT_IMPLEMENTED = "not_implemented"
 
+# Unit
 @unique
 class UnitType(str, Enum):
     UTILITY = "utility"   # Without loop, without Secretery:  mod + log
@@ -93,6 +106,7 @@ class UnitStat(str, Enum):
     REBIRTHING = "rebirthing"
     DESTROYED = "destroyed"
 
+# Thread
 @unique
 class ThreadType(Enum):
     TICKABLE = 0          # Active working thread
@@ -117,21 +131,16 @@ class UnitSource(Enum): # WHERE TO TAKE FROM (Source of objects)
 class UnitSelection(Enum): # WHOM TO TAKE (Object state filter)
     ALL = "all"         # Select everything
     ALIVE = "alive"     # Only those whose thread is currently running
-    DEAD = "dead"      # Only those finished or crashed (not alive)
+    DEAD = "dead"       # Only those finished or crashed (not alive)
     WORKING = "working" # Only those with 'WORKING' status
 
 @unique
 class ExecutionStrategy(Enum): # WHOM TO START (Post-creation action)
     NONE = "none"      # Create objects but do not call .start()
     ALL = "all"        # Start all selected units
-    WORKING = "sync"      # Start only those that were running before the reload
+    WORKING = "sync"   # Start only those that were running before the reload
 
-@unique
-class TierTask(Enum):
-    NONE = "none"
-    STARTING = "starting"
-    STOPPING = "stopping"
-
+# Translator
 @unique
 class TranspReadStat(Enum):
     OK = "ok"
@@ -140,8 +149,30 @@ class TranspReadStat(Enum):
     INCOMPLETE = "incomplete"
     AUTH_FAILED = "auth_failed"
 
-class SanapoError(Exception): pass
-class ModuleAddressError(SanapoError): pass
-class MessageInitError(SanapoError): pass
-class ClubAccessError(Exception): pass
-class UnitMutationError(Exception): pass
+# Register
+@dataclass
+class EnumRegistry:
+    """Full Registry for framework and project-specific Enums."""
+    # 1. For Frame
+    addr: Type[Addr]
+    msg: Type[MsgType]
+    sys: Type[SysType]
+    rpt: Type[RptType]
+    reason: Type[RptReason]
+    evt: None # from project
+    cmd: None # from project
+
+    # 2. Life loop
+    u_type: Type[UnitType]
+    u_stat: Type[UnitStat]
+    t_type: Type[ThreadType]
+    t_stat: Type[ThreadStat]
+    tier_stop: Type[ShutdownTier]
+
+    # 3. Trasport and sourses
+    source: Type[UnitSource]
+    selection: Type[UnitSelection]
+    transp_stat: Type[TranspReadStat]
+
+    # 4. service
+    logs: Type[Logs]

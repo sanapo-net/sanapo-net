@@ -4,6 +4,7 @@ import socket
 import threading
 import struct
 import json
+from time import time
 from typing import TYPE_CHECKING
 
 from sanapo.protocol import Frame
@@ -57,21 +58,30 @@ class TcpConnection(threading.Thread):
         self._log = logger
         self._cfg = config
         self.stitcher = FrameStitcher(config)
+        self.last_rx = time()
         self.is_alive = True
 
     def run(self):
         """Continuous receiving loop."""
+        self.sock.settimeout(self._cfg.CONN_KEEP_ALIVE)
         while self.is_alive:
             try:
                 data = self.sock.recv(4096)
                 if not data:
                     self.stop()
                     break
+                self.last_rx = time()
                 
                 packets = self.stitcher.put(data)
                 for raw_data in packets:
                     self._process_raw_frame(raw_data)
 
+            except socket.timeout:
+                idle_time = time() - self.last_rx
+                if idle_time > self._cfg.CONN_KEEP_ALIVE:
+                    self._log.wrn(f"TCP: Connection with {self.remote_system_name} timed out.")
+                    self.stop()
+                continue
             except ValueError as e:
                 self._log.crt(f"TCP: Security violation from {self.addr}: {e}")
                 self.stop()

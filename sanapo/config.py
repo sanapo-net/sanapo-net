@@ -1,5 +1,6 @@
 # sanapo/config.py
 from sanapo.enums import Logs
+from sanapo.addr import Addr
 
 class Config():
     # Kernel.
@@ -7,6 +8,7 @@ class Config():
     KERNEL_TICK_TCT = 0.0025 # seconds
     UNIT_SHUTDOWN_JOIN_INTERVAL = 0.3 # seconds
     UNIT_SHUTDOWN_JOIN_TIMEOUT = 0.02 # seconds
+    ADDR_KERNEL = Addr("KERNEL")
 
     # Logger.
     PATH_LOGS = "logs/"
@@ -39,13 +41,19 @@ class Config():
     # WatchDog.
     WATCHDOG_TCT = 1
 
-    # Translator
+    # Translator.
     TRANSLATOR_DIR = 'languarges/'
     UI_LANGUAGE = "en"
 
     # Transport.
     MAGIC_HEADER = 0x53616E61506F3130
     TCP_PORT_DEFAULT = 5000
+    UDP_PORT_DEFAULT = 5000
     HANDSHAKE_TIMEOUT = 5.0
     SYSTEM_NAME = 'SYSTEM_NAME_TEST'
     HOST = '0.0.0.0'
+    UDP_BEACON_INTERVAL = 10.0
+    CONN_KEEP_ALIVE = 30.0
+
+    # Broker.
+    ADDR_BROKER = Addr("BROKER")
