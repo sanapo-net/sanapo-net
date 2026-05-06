@@ -1,25 +1,26 @@
 # sanapo/secretary.py
 from __future__ import annotations
 from time import perf_counter
-from enum import Enum
 from queue import Empty
 from typing import TYPE_CHECKING
 
-from sanapo.enums import MsgType, SysType, RptType, RptReason, MessageInitError
+from sanapo.enums import MsgType, SysType, RptType, RptReason, MessageInitError, EnumRegistry
 from sanapo.protocol import Frame
-from sanapo.logger import Logger
 from sanapo.base_unit import BaseUnit
+from sanapo.addr import Addr
 
 if TYPE_CHECKING:
+    from enum import Enum
+    from typing import Type
     from queue import Queue
     from sanapo.config import Config
-
-EvtTypeClass = type[Enum]
-CmdTypeClass = type[Enum]
-Addr = Enum
-CmdId = str
-EvtType = Enum
-CmdType = Enum
+    from sanapo.logger import Logger
+    from sanapo.message_broker import MessageBroker
+    EvtType = Enum
+    CmdType = Enum
+    EvtTypeClass = Type[Enum]
+    CmdTypeClass = Type[Enum]
+    CmdId = str
 
 class Secretary:
     """
@@ -27,14 +28,13 @@ class Secretary:
     Handles deadlocks, automatically responds with INTO_WORK 
     and requests GIVE_ME_TIME when necessary.
     """
-    # TODO do i need it
     # Semantic constants for deadline management.
     KEEP = 0.0           # No change to current deadline
     FAIL = -float('inf') # Task expires immediately
     EVER = float('inf')  # Task never expires
 
     def __init__(self, address: Addr, outbox: Queue, inbox: Queue, config: Config, 
-                 logger: Logger, evt_enum: EvtTypeClass, cmd_enum: CmdTypeClass) -> None:
+                 logger: Logger, enum_reg: EnumRegistry, broker: MessageBroker) -> None:
         
         self._addr: Addr = address
         self._unit: BaseUnit = None
@@ -42,9 +42,11 @@ class Secretary:
         self._inbox: Queue = inbox      # Read-only queue from Kernel
         self._outbox: Queue = outbox    # Write-only queue to Kernel
         self._config: Config = config
+        self._broker: MessageBroker = broker # Store for Frame reconstruction
 
-        self._evt_cls: EvtTypeClass = evt_enum
-        self._cmd_cls: CmdTypeClass = cmd_enum
+        self._evt_cls = enum_reg.evt
+        self._cmd_cls = enum_reg.cmd
+        self._enum_reg = enum_reg # For Frame.from_dict
         self._handlers_cmd: dict[CmdType, callable] = {}
         self._handlers_evt: dict[EvtType, callable] = {}
         
@@ -128,7 +130,7 @@ class Secretary:
 
     def send_evt(self, evt_type: EvtType, payload: dict[str, any] = {}) -> bool:
         """Broadcast an event to the system bus."""
-        return  self._safe_send(msg_type=MsgType.EVENT, evt_type=evt_type, payload=payload)
+        return  self._safe_send(msg_type=MsgType.EVT, evt_type=evt_type, payload=payload)
 
     def send_cmd(self,
                 recipient: Addr,
@@ -148,7 +150,7 @@ class Secretary:
         If a specific callback is not provided, the default 'cb' is used.
         """
         self._cmd_counter += 1
-        cmd_id = f"{self._addr}_{self._cmd_counter}"
+        cmd_id = f"{self._addr.to_net(self._config.SYSTEM_NAME)}@{self._cmd_counter}"
         now = perf_counter()
         
         # Map specific callbacks to default if None
@@ -175,7 +177,7 @@ class Secretary:
         }
 
         return self._safe_send(
-            msg_type=MsgType.COMMAND,
+            msg_type=MsgType.CMD,
             recipient=recipient,
             cmd_type=cmd_type,
             cmd_id=cmd_id,
@@ -192,7 +194,7 @@ class Secretary:
             self._cmd_in.pop(cmd_id, None)
             
         return self._safe_send(
-                msg_type=MsgType.REPORT,
+                msg_type=MsgType.RPT,
                 recipient=recipient,
                 rpt_type=rpt_type,
                 cmd_id=cmd_id,
@@ -206,7 +208,7 @@ class Secretary:
         Only for Secretary.
         """
         return self._safe_send(
-            msg_type=MsgType.SYSTEM,
+            msg_type=MsgType.SYS,
             sys_type=sys_type,
             payload=payload
         )
@@ -241,7 +243,7 @@ class Secretary:
         """
         try:
             frame = Frame(
-                msg_type=MsgType.EVENT,
+                msg_type=MsgType.EVT,
                 sender=self._addr,
                 evt_type=evt_type,
                 payload=payload
@@ -252,25 +254,39 @@ class Secretary:
 
     # --- Internal logic ---
 
-    def _handle_frame(self, frame: Frame) -> bool:
+    def _handle_frame(self, incoming: Frame | dict) -> bool:
         """
-        Processes a single incoming frame,
+        Processes a single incoming message.
         Returns True if callback was called.
         """
+        # Lazy reconstruction of Frame from network dict using singleton addresses from Broker
+        if isinstance(incoming, dict):
+            try:
+                # Pass self._broker to resolve singleton Addr objects
+                frame = Frame.from_dict(incoming, self._enum_reg, self._broker)
+            except Exception as e:
+                self._logger.err(f"[Secr]: Failed to resurrect frame: {e}")
+                return False
+        else:
+            frame = incoming
+
         start_ts = perf_counter()
-        # Msg type map.
+        
+        # Dispatch table for message types
         dispatch = {
-            MsgType.SYSTEM: self._process_system,
-            MsgType.EVENT:  self._process_event,
-            MsgType.COMMAND: self._process_command,
-            MsgType.REPORT: self._process_report,
+            MsgType.SYS: self._process_system,
+            MsgType.EVT: self._process_event,
+            MsgType.CMD: self._process_command,
+            MsgType.RPT: self._process_report,
         }
+        
         handler = dispatch.get(frame.msg_type)
         if handler:
             res = handler(frame)
         else:
-            self._logger.err(f"[Secr]: Was got msg with Unknown type", frame, "MS")
+            self._logger.err("[Secr]: Received message with unknown type", frame, "MS")
             return False
+            
         self._log_task_duration(perf_counter() - start_ts, frame)
         return res
 
@@ -410,7 +426,7 @@ class Secretary:
     def _log_task_duration(self, duration: float, frame: Frame) -> None:
         """Diagnostic tool to detect module blocking."""
         duration_ms = duration * 1000
-        durs = [0.001, 0.01, 0,1, 0,25, 0,5, 1.0, 2.0, 4.0, 8.0]
+        durs = [0.001, 0.01, 0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0]
         i = next((index for index, val in enumerate(durs) if duration_ms < val), len(durs))
         speed = f"speed_{i}"
         self._logger.dbg(f"[Secr]: Done {speed}: {duration_ms:.1f}ms", frame, "t")
@@ -420,7 +436,7 @@ class Secretary:
         Registers a module object with the secretary to call its methods directly. 
         Only for Kernel.
         """
-        if isinstance(unit, BaseUnit):
+        if not isinstance(unit, BaseUnit):
             self._logger.err(f"[Secr]: set_unit: get not BaseUnit: {unit}")
             return False
         if self._unit is not None:

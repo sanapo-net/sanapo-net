@@ -2,9 +2,13 @@
 from dataclasses import dataclass
 from enum import Enum
 from typing import Type
+from typing import TYPE_CHECKING
 
 from sanapo.enums import MsgType, SysType, RptType, RptReason, EnumRegistry, MessageInitError
 from sanapo.addr import Addr
+
+if TYPE_CHECKING:
+    from sanapo.message_broker import MessageBroker
 
 EvtType = Enum
 CmdType = Enum
@@ -85,7 +89,7 @@ class Frame:
         return {k: v for k, v in data.items() if v is not None}
 
     @classmethod
-    def from_dict(cls, data: dict, reg: EnumRegistry, deep: bool = False, 
+    def from_dict(cls, data: dict, reg: EnumRegistry, broker: MessageBroker, deep: bool = False, 
                   payload_enums: list[Type[Enum]] = None) -> 'Frame':
         """
         Reconstructs a Frame from a dictionary. 
@@ -108,13 +112,13 @@ class Frame:
 
         frame = cls(
             msg_type=m_type,
-            sender=reg.addr.from_str(data["sender"]), 
+            sender=broker.get_addr(data["sender"]), 
             payload=data.get("payload", {}),
             sys_type=get_e(reg.sys, sub_val) if m_type == MsgType.SYS else None,
             evt_type=get_e(reg.evt, sub_val) if m_type == MsgType.EVT else None,
             cmd_type=get_e(reg.cmd, sub_val) if m_type == MsgType.CMD else None,
             rpt_type=get_e(reg.rpt, sub_val) if m_type == MsgType.RPT else None,
-            recipient=reg.addr.from_str(data["recipient"]) if data.get("recipient") else None,
+            recipient=broker.get_addr(data["recipient"]) if data.get("recipient") else None,
             cmd_id=data.get("cmd_id"),
             reason=get_e(reg.reason, data.get("reason")),
             deadline=data.get("deadline"),
@@ -125,3 +129,29 @@ class Frame:
             object.__setattr__(frame, 'payload', new_payload)
 
         return frame
+    
+    @classmethod
+    def from_dict_light(cls, data: dict, reg: EnumRegistry, broker: MessageBroker) -> 'Frame':
+        """
+        Lightweight frame reconstruction. 
+        Restores header Enums using the Registry while keeping the payload raw.
+        """
+        m_type = MsgType(data["msg_type"])
+        sub_val = data.get("sub_type")
+
+        # Fast mapping without deep validation of payload structure
+        return cls(
+            msg_type=m_type,
+            sender=broker.get_addr(data["sender"]),
+            payload=data.get("payload", {}), # Keep payload as raw dict/data
+            sys_type=reg.sys(sub_val) if m_type == MsgType.SYS else None,
+            evt_type=reg.evt(sub_val) if m_type == MsgType.EVT else None,
+            cmd_type=reg.cmd(sub_val) if m_type == MsgType.CMD else None,
+            rpt_type=reg.rpt(sub_val) if m_type == MsgType.RPT else None,
+            recipient=broker.get_addr(data.get("recipient")) if data.get("recipient") else None,
+            cmd_id=data.get("cmd_id"),
+            reason=reg.reason(data.get("reason")) if data.get("reason") else None,
+            deadline=data.get("deadline"),
+            time_ext_req=data.get("time_ext_req")
+        )
+

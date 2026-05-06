@@ -9,9 +9,9 @@ from sanapo.addr import Addr
 @unique
 class Logs(str, Enum):
     CRT = "crt"
-    ERR = "err",
-    WRN = "wrn",
-    INF = "inf",
+    ERR = "err"
+    WRN = "wrn"
+    INF = "inf"
     DBG = "dbg"
 
 # Tier
@@ -63,6 +63,8 @@ class SysType(str, Enum):
     U_MUTATE = "u_mutate"
     # Transport
     RAW = "raw"
+    NET_CONNECTED = "net_connected"
+    REG_UNIT = "reg_unit"
 
 @unique
 class RptType(str, Enum):
@@ -86,6 +88,13 @@ class RptReason(str, Enum):
     NOT_IMPLEMENTED = "not_implemented"
 
 # Unit
+@unique # TODO
+class UnitRole(Enum):
+    WORKER = "worker"     # Common worker
+    MANAGER = "manager"   # Coordinator
+    GATEWAY = "gateway"   # Network bridge
+    REPORTER = "reporter" # Data sink
+
 @unique
 class UnitType(str, Enum):
     UTILITY = "utility"   # Without loop, without Secretery:  mod + log
@@ -159,8 +168,8 @@ class EnumRegistry:
     sys: Type[SysType]
     rpt: Type[RptType]
     reason: Type[RptReason]
-    evt: None # from project
-    cmd: None # from project
+    evt: Type[Enum] # from project
+    cmd: Type[Enum] # from project
 
     # 2. Life loop
     u_type: Type[UnitType]
@@ -176,3 +185,9 @@ class EnumRegistry:
 
     # 4. service
     logs: Type[Logs]
+
+class SanapoError(Exception): pass
+class ModuleAddressError(SanapoError): pass
+class MessageInitError(SanapoError): pass
+class ClubAccessError(Exception): pass
+class UnitMutationError(Exception): pass

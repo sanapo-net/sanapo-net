@@ -4,7 +4,7 @@ import socket
 import threading
 import struct
 import json
-from time import time
+from time import perf_counter
 from typing import TYPE_CHECKING
 
 from sanapo.protocol import Frame
@@ -58,27 +58,27 @@ class TcpConnection(threading.Thread):
         self._log = logger
         self._cfg = config
         self.stitcher = FrameStitcher(config)
-        self.last_rx = time()
+        self.last_rx = perf_counter()
         self.is_alive = True
 
     def run(self):
-        """Continuous receiving loop."""
-        self.sock.settimeout(self._cfg.CONN_KEEP_ALIVE)
+        """Continuous receiving loop with heartbeat check."""
+        # Set a shorter timeout for recv to check idle time periodically
+        self.sock.settimeout(5.0) 
         while self.is_alive:
             try:
                 data = self.sock.recv(4096)
                 if not data:
                     self.stop()
                     break
-                self.last_rx = time()
                 
+                self.last_rx = perf_counter()
                 packets = self.stitcher.put(data)
                 for raw_data in packets:
                     self._process_raw_frame(raw_data)
 
             except socket.timeout:
-                idle_time = time() - self.last_rx
-                if idle_time > self._cfg.CONN_KEEP_ALIVE:
+                if perf_counter() - self.last_rx > self._cfg.CONN_KEEP_ALIVE:
                     self._log.wrn(f"TCP: Connection with {self.remote_system_name} timed out.")
                     self.stop()
                 continue
@@ -86,23 +86,18 @@ class TcpConnection(threading.Thread):
                 self._log.crt(f"TCP: Security violation from {self.addr}: {e}")
                 self.stop()
             except Exception as e:
-                self._log.err(f"TCP: Connection with {self.remote_system_name} lost: {e}")
+                if self.is_alive:
+                    self._log.err(f"TCP: Connection with {self.remote_system_name} lost: {e}")
                 self.stop()
 
     def _process_raw_frame(self, raw_data: bytes):
-        """Converts raw bytes to a validated Frame and pushes to Broker bus."""
+        """Converts raw bytes to dict and pushes to Broker bus for lazy reconstruction."""
         try:
-            # Decode bytes to dictionary.
+            # Reconstruct is now moved to Secretary for performance
             data_dict = json.loads(raw_data.decode('utf-8'))
-            
-            # Reconstruct Frame using EnumRegistry from Broker.
-            frame = Frame.from_dict(data_dict, self._broker.enum_reg)
-            
-            # Push to global bus.
-            self._broker.bus.put(frame)
-            
+            self._broker.bus.put(data_dict)
         except Exception as e:
-            self._log.err(f"TCP: Failed to decode frame from {self.remote_system_name}: {e}")
+            self._log.err(f"TCP: Failed to decode JSON from {self.remote_system_name}: {e}")
 
     def send_raw(self, data: bytes) -> bool:
         """Physical transmission over the wire."""
@@ -213,6 +208,16 @@ class TcpService(threading.Thread):
             self._connections[name] = conn
             conn.start()
             self._log.inf(f"TCP: Federation link with '{name}' established.")
+            
+            report = {
+                "msg_type": "sys",
+                "sub_type": "net_connected",
+                "sender": "LOCAL:TCP_SERVICE",
+                "recipient": "LOCAL:KERNEL",
+                "payload": {"sys_name": name}
+            }
+            self._broker.bus.put(report)
+
 
     def send_to_system(self, system_name: str, payload: bytes) -> bool:
         """Sends to a named system (Federated routing)."""

@@ -57,3 +57,4 @@ class Config():
 
     # Broker.
     ADDR_BROKER = Addr("BROKER")
+    BROKER_BUS_READ_LIMIT = 500

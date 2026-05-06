@@ -20,8 +20,8 @@ class TcpAdapterTransport(BaseAdapterTransport):
         self._service = service
         self._sys_name = sys_name
         
-        # Buffer for reconstructed frames from the network.
-        self._inbox: queue.Queue[Frame] = queue.Queue()
+        # Buffer for raw dicts from the network.
+        self._inbox: queue.Queue[dict] = queue.Queue()
 
     def send(self, frame: Frame) -> bool:
         """
@@ -31,8 +31,8 @@ class TcpAdapterTransport(BaseAdapterTransport):
         try:
             payload = self._frame_to_spec(frame)
             
-            # If the address indicates a different system (Federation).
-            if frame.recipient.system != "LOCAL" and frame.recipient.system != self._sys_name:
+            # Use Addr object's own logic to check locality.
+            if not frame.recipient.is_local(self._sys_name):
                 return self._service.send_to_system(frame.recipient.system, payload)
             
             # For local TCP-Unit.
@@ -41,11 +41,12 @@ class TcpAdapterTransport(BaseAdapterTransport):
         except Exception:
             return False
 
+
     def read(self) -> dict[str, any]:
-        """Reads one reconstructed frame from the internal buffer."""
+        """Reads one raw dictionary from the internal buffer."""
         try:
-            frame = self._inbox.get_nowait()
-            return {"frame": frame, "stat": TranspReadStat.OK, "raw": None}
+            raw_data = self._inbox.get_nowait()
+            return {"frame": raw_data, "stat": TranspReadStat.OK, "raw": raw_data}
         except queue.Empty:
             return {"frame": None, "stat": TranspReadStat.EMPTY, "raw": None}
 
@@ -58,11 +59,6 @@ class TcpAdapterTransport(BaseAdapterTransport):
         return self._service.is_alive(self.spec_addr)
     
     def _frame_to_spec(self, frame: Frame) -> bytes:
-        """Serializes Frame to bytes: [SanaPo10 (8b)] + [Length (4b)] + [Data]."""
+        """Serializes Frame to bytes"""
         raw_data = frame.to_dict()
         return json.dumps(raw_data).encode('utf-8')
-
-    def _spec_to_frame(self, raw_bytes: bytes) -> Frame:
-        """Deserializes raw bytes back into a Frame object."""
-        data_dict = json.loads(raw_bytes.decode('utf-8'))
-        return Frame.from_dict(data_dict)
