@@ -22,8 +22,9 @@ class ThreadManager:
                 config: Config,
                 name: str,
                 type: ThreadType | None = None,
-                margin: float | None = None,
-                tct: float | None = None
+                tct: float | None = None,
+                tct_hiber: float | None = None,
+                join_margin: float | None = None,
         ) -> None:
         self._config = config
         self._logger = Logger("THREAD_" + name)
@@ -49,13 +50,10 @@ class ThreadManager:
         # Timing.
         self.last_step = perf_counter()
         self.step_timeout
-        self._margin = margin or config.THREAD_JOIN_MARGIN
-        self._tct = tct or config.THREAD_TCT_DEFAULT
+        self._join_margin = max(0.001, join_margin or config.THREAD_JOIN_MARGIN)
+        self._tct = max(0.001, tct or config.THREAD_TCT_DEFAULT)
         # Hibernate TCT: must be longer or equal to normal TCT.
-        if config.THREAD_TCT_HIBERNATE_DEFAULT > self._tct:
-            self._tct_hibernate = config.THREAD_TCT_HIBERNATE_DEFAULT
-        else:
-            self._tct_hibernate = self._tct
+        self._tct_hibernate = max(self._tct, (tct_hiber or config.THREAD_TCT_HIBERNATE_DEFAULT))
 
         # Internal.
         self._units: dict[Addr, BaseUnit] = {}
@@ -134,11 +132,6 @@ class ThreadManager:
             self.stat = last_stat
             return False
         
-        # Filter units to create in new thread.
-        if select not in select_filter_map.keys():
-            self._logger.err(f"Reload: unforeseen select: {select}")
-            self.stat = last_stat
-            return False
         select_filter_map = {
             UnitSelection.ALL: list(UnitStat),
             UnitSelection.ALIVE: list(set(UnitStat) - {UnitStat.HALTED, UnitStat.DESTROYED}),
@@ -146,6 +139,13 @@ class ThreadManager:
             UnitSelection.WORKING: [UnitStat.STARTING, UnitStat.WORKING,
                                     UnitStat.SLEEPING, UnitStat.REBIRTHING],
         }
+
+        # Filter units to create in new thread.
+        if select not in select_filter_map.keys():
+            self._logger.err(f"Reload: unforeseen select: {select}")
+            self.stat = last_stat
+            return False
+        
         to_creating = [u for u in to_selection if u in select_filter_map[select]]
 
         # Units to start.
@@ -212,9 +212,9 @@ class ThreadManager:
                 if unit.stop_timeout > max_u_timeout:
                     max_u_timeout = unit.stop_timeout
         if timeout is None:
-            timeout = max_u_timeout + self._margin
+            timeout = max_u_timeout + self._join_margin
         # Log timeout.
-        self._logger.inf(f"Joining. Max u_timeout: {max_u_timeout}s + margin: {self._margin}s")
+        self._logger.inf(f"Joining. Max u_timeout: {max_u_timeout}s + margin: {self._join_margin}s")
         # Join process.
         self._stop_event.set()
         self.on_msg()
@@ -268,6 +268,7 @@ class ThreadManager:
             if wait_time > 0:
                 if self._wakeup_event.wait(timeout=wait_time):
                     self._wakeup_event.clear()
+                    
 
     def _handle_commands(self, active_units: list[BaseUnit]) -> float:
         """Process ADD/REMOVE/SET_TCT commands from the queue."""
@@ -296,7 +297,7 @@ class ThreadManager:
         units = [u for u in self._units.values() if u.stat == UnitStat.WORKING]
         n = len(units)
         if n == 0:
-            self.step_timeout = self._margin
+            self.step_timeout = self._join_margin
             return
 
         # Engineering attenuation coefficient.
@@ -307,7 +308,7 @@ class ThreadManager:
         
         # The limit cannot be less than the longest unit + margin.
         calculated = sum_timeouts * k
-        self.step_timeout = max(calculated, max_u_timeout) + self._margin
+        self.step_timeout = max(calculated, max_u_timeout) + self._join_margin
 
     def _manage_thread_type(self, has_tickables: bool) -> None:
         """Adjust type based on unit composition."""

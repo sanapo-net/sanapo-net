@@ -83,7 +83,7 @@ class MessageBroker:
         # 2. SYSTEM: Internal signaling and subscriptions
         elif frame.msg_type == MsgType.SYS:
             self._handle_system(frame)
-            self._deliver(frame, self._cfg.ADDR_KERNEL)
+            self._deliver(frame, self._cfg.ADDR_KERNEL_STR)
 
         # 3. COMMANDS / REPORTS: Direct delivery
         else:

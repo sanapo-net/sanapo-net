@@ -88,13 +88,6 @@ class RptReason(str, Enum):
     NOT_IMPLEMENTED = "not_implemented"
 
 # Unit
-@unique # TODO
-class UnitRole(Enum):
-    WORKER = "worker"     # Common worker
-    MANAGER = "manager"   # Coordinator
-    GATEWAY = "gateway"   # Network bridge
-    REPORTER = "reporter" # Data sink
-
 @unique
 class UnitType(str, Enum):
     UTILITY = "utility"   # Without loop, without Secretery:  mod + log

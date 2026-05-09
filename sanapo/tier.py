@@ -1,4 +1,4 @@
-# sanapo/watch_dog.py
+# sanapo/tier.py
 from __future__ import annotations
 from time import perf_counter
 from typing import TYPE_CHECKING
@@ -18,25 +18,25 @@ class Tier:
     def __init__(self, kernel: Kernel, layer_num: int, 
                  units: dict[BaseUnit] | None = None, name: str | None = None) -> None:
         self.kernel: Kernel = kernel
-        self.config: Config = kernel._config
+        self.config: Config = kernel._cfg
         self.name: str = name or f"LAYER_{layer_num}"
         self._logger = Logger("TIER_" + name)
         
         self._units: list[BaseUnit] = units or [] 
         self._target_units: list[BaseUnit] = []        
-        self._task = TierTask.NONE
+        self.task = TierTask.NONE
         
         self._unit_start_times: dict[str, float] = {}
         self._attempts: dict[str, int] = {} 
 
     def step(self) -> None:
         """Main kernel loop iteration"""
-        if self._task == TierTask.NONE or not self._target_units:
+        if self.task == TierTask.NONE or not self._target_units:
             return
 
-        if self._task == TierTask.STARTING:
+        if self.task == TierTask.STARTING:
             self._process_starting(perf_counter())
-        elif self._task == TierTask.STOPPING:
+        elif self.task == TierTask.STOPPING:
             self._process_stopping(perf_counter())
 
     def _process_starting(self, now: float):
@@ -165,6 +165,6 @@ class Tier:
                 else: self.kernel.on_tier_stopped(self)
 
             # Reset tier task.
-            self._task = TierTask.NONE
+            self.task = TierTask.NONE
             self._attempts.clear()
             self._unit_start_times.clear()

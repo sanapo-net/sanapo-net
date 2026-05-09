@@ -1,14 +1,13 @@
 # sanapo/config.py
 from sanapo.enums import Logs
-from sanapo.addr import Addr
 
 class Config():
     # Kernel.
+    KERNEL_TCT = 0.0025 # seconds
+    ADDR_KERNEL_STR = "KERNEL"
+    SYS_CONSIST_DELAY = 5
+    SYS_CONSIST_PATH = "sys_consists/"
     THRESHOLD_BUS_OVERCROWDED = 100
-    KERNEL_TICK_TCT = 0.0025 # seconds
-    UNIT_SHUTDOWN_JOIN_INTERVAL = 0.3 # seconds
-    UNIT_SHUTDOWN_JOIN_TIMEOUT = 0.02 # seconds
-    ADDR_KERNEL = Addr("KERNEL")
 
     # Logger.
     PATH_LOGS = "logs/"
@@ -28,7 +27,6 @@ class Config():
     # ThreadManager.
     THREAD_TCT_DEFAULT = 0.02
     THREAD_TCT_HIBERNATE_DEFAULT = 0.1
-    THREAD_STEP_TIMEOUT_MARGIN = 1
     THREAD_JOIN_MARGIN = 2
     FPS_MODE = True
     HIBERNATE_MODE = True
@@ -56,5 +54,5 @@ class Config():
     CONN_KEEP_ALIVE = 30.0
 
     # Broker.
-    ADDR_BROKER = Addr("BROKER")
+    ADDR_BROKER_STR = "BROKER"
     BROKER_BUS_READ_LIMIT = 500

@@ -5,11 +5,12 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from sanapo.enums import UnitType, UnitStat, SysType
+    from sanapo.enums import UnitType, UnitStat
     from sanapo.config import Config
     from sanapo.logger import Logger
     from sanapo.secretary import Secretary
     from sanapo.base_module import BaseModule
+    from sanapo.manifest import Manifest
 
 Addr = Enum
 
@@ -28,20 +29,20 @@ class BaseUnit():
         self.type: UnitType = type
         self.logger: Logger = logger
         self.secr: Secretary = secr
+        self.manifest: Manifest = None # Kernel make it
 
         self._module: BaseModule | None = None
         self._module_class: any = module_class
         self._module_params: dict[str, any] = module_params
-
+        
         self.stat: UnitStat = UnitStat.CREATING
 
-        
         self._is_destroying: bool = False
         self._needs_rebirth = False
         self._stop_deadline: float | None = None
-        self.start_timeout:float = getattr(self._module, 'start_timeout',config.UNIT_START_TIMEOUT) 
-        self.stop_timeout: float = getattr(self._module, 'stop_timeout', config.UNIT_STOP_TIMEOUT) 
-        self.step_timeout: float = getattr(module_class, 'step_timeout', config.UNIT_STEP_TIMEOUT)
+        self.start_timeout:float = config.UNIT_START_TIMEOUT
+        self.stop_timeout: float = config.UNIT_STOP_TIMEOUT
+        self.step_timeout: float = config.UNIT_STEP_TIMEOUT
         self._last_step: float = perf_counter()
         self._step_map = {
             UnitStat.WORKING: {

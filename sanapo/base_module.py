@@ -1,29 +1,41 @@
 # sanapo/base_module.py
 from __future__ import annotations
-import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from sanapo.logger import Logger
-    from sanapo.config import Config
-    from sanapo.enums import UnitType
-    from sanapo.secretary import Secretary
+    from sanapo.base_unit import BaseUnit
 
 class BaseModule:
-    def __init__(self, m_type: UnitType, logger: Logger, secr: Secretary | None, config: Config):
-        self.type = m_type
-        self.log = logger
-        self._secr = secr
-        self._cfg = config
+    def __init__(self, u: BaseUnit, **params):
+        self._u: BaseUnit = u
         self._is_running = True
         self._is_paused = False
 
+    def define_manifest(self) -> dict:
+        """The module itself describes its characteristics."""
+        """
+        return {
+            "version": "2.4.1",      # Specific module version
+            "tags": {"some_teg",...},# Skill Tags
+            "role": "default",       # Role in system
+            "is_public": True,       # Can module be public
+            "is_persistent": True    # Save module to dump for restarting
+        }
+        """
+        return {}
+    
     def step(self):
+        """Doings for every step here"""
         pass
 
     def stop(self):
+        """Save/close resurses here"""
         pass
 
     def start(self):
+        """Open/load resurses here, preparings and setup unit-params"""
+        # For custom values, update them:
+        # self._u.start_timeout = 0.5
+        # self._u.stop_timeout = 2
+        # self._u.step_timeout = 0.2
         pass
-
