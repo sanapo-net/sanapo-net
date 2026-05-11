@@ -11,8 +11,7 @@ if TYPE_CHECKING:
     from sanapo.secretary import Secretary
     from sanapo.base_module import BaseModule
     from sanapo.manifest import Manifest
-
-Addr = Enum
+    from sanapo.addr import Addr
 
 class BaseUnit():
     def __init__(self,
@@ -154,16 +153,23 @@ class BaseUnit():
         return True
 
     def destroy(self) -> bool:
+        dont_work = [UnitStat.CREATED, UnitStat.STOPPED, UnitStat.DESTROYED, UnitStat.HALTED]
         if not self._is_destroying:
             self._is_destroying = True
-            if self.stat not in [UnitStat.STOPPED, UnitStat.DESTROYED]:
+            if self.stat not in dont_work:
                 self.stop()
-                return False
-        self._step_map = None
-        self._module = None
-        self.logger = None 
-        self.secr = None
-        return True
+        if self.stat in dont_work:
+            self.stat = UnitStat.DESTROYED
+            self._module_params = None
+            self._step_map = None
+            self._module = None
+            self.manifest = None
+            self.logger = None 
+            self.secr = None
+            self.addr = None
+            return True
+        else:
+            return False
     
     def mutate(self, new_type: UnitType) -> bool:
         if not isinstance(new_type, UnitType):

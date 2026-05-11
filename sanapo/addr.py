@@ -19,7 +19,7 @@ class Addr:
         return f"{self.system}:{self.unit}"
 
     @classmethod
-    def from_str(cls, addr_str: str) -> 'Addr':
+    def from_str(cls, addr_str: str) -> 'Addr' | None:
         """Basic parser. Normalization happens in Broker.get_addr()."""
         if not addr_str: return None
         if ":" in addr_str:

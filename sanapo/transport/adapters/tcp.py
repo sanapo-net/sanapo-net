@@ -29,14 +29,14 @@ class TcpAdapterTransport(BaseAdapterTransport):
         if it's local on TCP, it sends by physical address.
         """
         try:
-            payload = self._frame_to_spec(frame)
-            
+            raw_data = json.dumps(frame.to_dict()).encode('utf-8')
+
             # Use Addr object's own logic to check locality.
             if not frame.recipient.is_local(self._sys_name):
-                return self._service.send_to_system(frame.recipient.system, payload)
+                return self._service.send_to_system(frame.recipient.system, raw_data)
             
             # For local TCP-Unit.
-            return self._service.send_to_addr(self.spec_addr, payload)
+            return self._service.send_to_addr(self.spec_addr, raw_data)
             
         except Exception:
             return False
@@ -57,8 +57,3 @@ class TcpAdapterTransport(BaseAdapterTransport):
     def is_ready(self) -> bool:
         """Checks if the network service and target are available."""
         return self._service.is_alive(self.spec_addr)
-    
-    def _frame_to_spec(self, frame: Frame) -> bytes:
-        """Serializes Frame to bytes"""
-        raw_data = frame.to_dict()
-        return json.dumps(raw_data).encode('utf-8')

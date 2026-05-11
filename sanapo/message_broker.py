@@ -40,11 +40,11 @@ class MessageBroker:
         """Link the broker to the network infrastructure."""
         self._tcp_service = service
 
-    def register_local_route(self, unit_name: str, transport: BaseAdapterTransport):
-        """Registers a unit using unit name string."""
-        addr_obj = self.get_addr(unit_name)
+    def register_local_route(self, transport: BaseAdapterTransport):
+        """Registers a local route using the address already stored in the transport."""
+        addr_obj = transport.sanapo_addr
         self._local_routes[addr_obj] = transport
-        self._log.inf(f"Local route registered for {addr_obj}")
+        self._log.inf(f"Broker: Local route registered for {addr_obj}")
 
     def register_federation_route(self, system_name: str, transport: BaseAdapterTransport):
         """Registers a link to another sanapo instance."""
@@ -143,7 +143,7 @@ class MessageBroker:
             )
             self._deliver(report, frame.sender)
 
-    def get_addr(self, addr_str: str) -> Addr:
+    def get_addr(self, addr_str: str) -> Addr | None:
         """
         Normalizes and returns a singleton Addr object.
         Replaces local system name with 'LOCAL'.
@@ -154,10 +154,24 @@ class MessageBroker:
         sys_part = temp_addr.system
         if sys_part == self._cfg.SYSTEM_NAME:
             sys_part = "LOCAL"
+            need_new_addr = True
             
         cache_key = f"{sys_part}:{temp_addr.unit}"
         
         if cache_key not in self._addr_book:
-            self._addr_book[cache_key] = Addr(unit=temp_addr.unit, system=sys_part)
-            
-        return self._addr_book[cache_key]
+            if need_new_addr:
+                addr = Addr(unit=temp_addr.unit, system=sys_part)
+            else:
+                addr = temp_addr
+            self._addr_book[cache_key] = addr
+            return addr
+        else:
+            return None
+        
+    def deregister_addr(self, addr:Addr) -> bool:
+        cache_key = f"{addr.system}:{addr.unit.unit}"
+        del_addr = self._addr_book.pop(cache_key, None)
+        if del_addr:
+            return True
+        else:
+            return False

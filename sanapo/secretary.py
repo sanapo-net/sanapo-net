@@ -33,8 +33,16 @@ class Secretary:
     FAIL = -float('inf') # Task expires immediately
     EVER = float('inf')  # Task never expires
 
-    def __init__(self, address: Addr, outbox: Queue, inbox: Queue, config: Config, 
-                 logger: Logger, enum_reg: EnumRegistry, broker: MessageBroker) -> None:
+    def __init__(self,
+                address: Addr,
+                outbox: Queue,
+                inbox: Queue,
+                config: Config,
+                logger: Logger,
+                evt_class: EvtTypeClass,
+                cmd_class: CmdTypeClass,
+                resurrect_func: callable
+            ) -> None:
         
         self._addr: Addr = address
         self._unit: BaseUnit = None
@@ -42,13 +50,13 @@ class Secretary:
         self._inbox: Queue = inbox      # Read-only queue from Kernel
         self._outbox: Queue = outbox    # Write-only queue to Kernel
         self._config: Config = config
-        self._broker: MessageBroker = broker # Store for Frame reconstruction
 
-        self._evt_cls = enum_reg.evt
-        self._cmd_cls = enum_reg.cmd
-        self._enum_reg = enum_reg # For Frame.from_dict
+        self._evt_cls: EvtTypeClass = evt_class
+        self._cmd_cls: CmdTypeClass = cmd_class
         self._handlers_cmd: dict[CmdType, callable] = {}
         self._handlers_evt: dict[EvtType, callable] = {}
+        
+        self._resurrect: callable = resurrect_func
         
         # Performance & Concurrency config.
         self._has_thread_pool: bool = False       # Set to True by module if it uses own threads
@@ -262,8 +270,8 @@ class Secretary:
         # Lazy reconstruction of Frame from network dict using singleton addresses from Broker
         if isinstance(incoming, dict):
             try:
-                # Pass self._broker to resolve singleton Addr objects
-                frame = Frame.from_dict(incoming, self._enum_reg, self._broker)
+                # Get Frame from Dict
+                frame = self._resurrect(incoming)
             except Exception as e:
                 self._logger.err(f"[Secr]: Failed to resurrect frame: {e}")
                 return False

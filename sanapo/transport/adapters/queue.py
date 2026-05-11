@@ -28,14 +28,14 @@ class QueueAdapterTransport(BaseAdapterTransport):
             frame = self.spec_addr.get_nowait()
             if frame:
                 if isinstance(frame, Frame):
-                    return {"frame": frame, "stat": TranspReadStat.OK, "raw": frame}
+                    return {"frame": frame, "stat": TranspReadStat.OK, "raw": None}
                 else:
-                    return {"frame": None, "stat": TranspReadStat.CORRUPTED, "raw": None}
+                    return {"frame": None, "stat": TranspReadStat.CORRUPTED, "raw": frame}
             return {"frame": None, "stat": TranspReadStat.CORRUPTED, "raw": None}
         except Empty:
             return {"frame": None, "stat": TranspReadStat.EMPTY, "raw": None}
         except Exception as e:
-            return {"frame": None, "stat": TranspReadStat.CORRUPTED, "raw": None}
+            return {"frame": None, "stat": TranspReadStat.CORRUPTED, "raw": e}
 
     def is_empty(self) -> bool:
         return self.spec_addr.empty()

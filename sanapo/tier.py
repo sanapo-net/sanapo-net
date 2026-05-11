@@ -3,7 +3,7 @@ from __future__ import annotations
 from time import perf_counter
 from typing import TYPE_CHECKING
 
-from sanapo.enums import UnitStat, TierTask
+from sanapo.enums import UnitStat, TierTask, ThreadStat
 from sanapo.enums import UnitSource, UnitSelection, ExecutionStrategy
 
 if TYPE_CHECKING:
@@ -15,19 +15,39 @@ if TYPE_CHECKING:
     
 class Tier:
     """Tier manages unit lifecycle layers with active survival logic."""
-    def __init__(self, kernel: Kernel, layer_num: int, 
-                 units: dict[BaseUnit] | None = None, name: str | None = None) -> None:
+    def __init__(self,
+                 kernel: Kernel,
+                 layer_num: int,
+                 name: str | None = None, 
+                 auto: bool | None = False
+            ) -> None:
         self.kernel: Kernel = kernel
         self.config: Config = kernel._cfg
+        self.layer_num: int = layer_num
         self.name: str = name or f"LAYER_{layer_num}"
+        self.autocreated: bool = auto
         self._logger = Logger("TIER_" + name)
         
-        self._units: list[BaseUnit] = units or [] 
+        self._units: list[BaseUnit] = [] 
         self._target_units: list[BaseUnit] = []        
         self.task = TierTask.NONE
         
         self._unit_start_times: dict[str, float] = {}
         self._attempts: dict[str, int] = {} 
+
+    def start(self) -> bool:
+        if self.task != TierTask.NONE:
+            return False
+        else:
+            self.task = TierTask.STARTING
+            return True
+        
+    def stop(self) -> bool:
+        if self.task != TierTask.NONE:
+            return False
+        else:
+            self.task = TierTask.STOPPING
+            return True
 
     def step(self) -> None:
         """Main kernel loop iteration"""
@@ -42,6 +62,10 @@ class Tier:
     def _process_starting(self, now: float):
         """Startup escalation logic."""
         for unit in self._target_units:
+            thread: ThreadManager = self.kernel.get_manager_by_unit()
+            if thread.stat != ThreadStat.WORKING:
+                thread.start()
+            unit.start()
             if unit.stat == UnitStat.WORKING:
                 self._finish_unit_task(unit, "Started")
                 continue
@@ -83,9 +107,9 @@ class Tier:
 
     def _esc_thread_replay(self, unit: BaseUnit, now: float):
         """Attempt 3: Replay the thread."""
-        manager: ThreadManager = self.kernel.get_manager_by_unit(unit)
+        thread: ThreadManager = self.kernel.get_manager_by_unit(unit)
         # Check for 'living' units from other tiers.
-        others = [u for u in manager._units.values() if u != unit]
+        others = [u for u in thread._units.values() if u != unit]
         is_safe = True
         not_alive = [UnitStat.STOPPED, UnitStat.HALTED, UnitStat.DESTROYED]
         for u in others:
@@ -94,12 +118,12 @@ class Tier:
                 break
 
         if is_safe:
-            self._logger.crt(f"Thread {manager.name} STUCK. Action: REPLAY.")
-            manager.reload(UnitSource.CURRENT, UnitSelection.ALL, ExecutionStrategy.WORKING)
+            self._logger.crt(f"Thread {thread.name} STUCK. Action: REPLAY.")
+            thread.reload(UnitSource.CURRENT, UnitSelection.ALL, ExecutionStrategy.WORKING)
             self._attempts[unit.addr] = 3
             self._unit_start_times[unit.addr] = now
         else:
-            self._logger.err(f"Thread {manager.name} busy with others. Action: SKIP UNIT.")
+            self._logger.err(f"Thread {thread.name} busy with others. Action: SKIP UNIT.")
             self._esc_fail(unit)
 
     def _esc_fail(self, unit: float):
@@ -122,10 +146,11 @@ class Tier:
     def _process_stopping(self, now: float):
         """Logic for checking unit shutdown progress."""
         for unit in self._target_units:
-            manager: ThreadManager = self.kernel.get_manager_by_unit(unit)
+            thread: ThreadManager = self.kernel.get_manager_by_unit(unit)
+            unit.stop()
             # Check if unit is already dead or stopped.
             if unit.stat in [UnitStat.STOPPED, UnitStat.HALTED, UnitStat.DESTROYED]:
-                if manager: manager.remove_unit(unit.addr)
+                if thread: thread.remove_unit(unit.addr)
                 self._finish_unit_task(unit, "Stopped")
                 continue
 
@@ -138,10 +163,10 @@ class Tier:
                 unit.stat = UnitStat.HALTED
                 
                 # Optional: try to kill the thread if it's the only unit there.
-                if manager and len(manager._units) == 1:
-                    t = f"Forcing thread {manager.name} RELOAD due to stuck unit {unit.addr}"
+                if thread and len(thread._units) == 1:
+                    t = f"Forcing thread {thread.name} RELOAD due to stuck unit {unit.addr}"
                     self._logger.crt(t)
-                    manager.reload(UnitSource.CURRENT,  UnitSelection.ALL, ExecutionStrategy.ALL)
+                    thread.reload(UnitSource.CURRENT,  UnitSelection.ALL, ExecutionStrategy.ALL)
 
         self._check_completion(is_start=False)
 

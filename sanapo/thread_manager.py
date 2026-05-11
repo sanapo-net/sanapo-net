@@ -100,13 +100,14 @@ class ThreadManager:
         self._update_step_timeout()
         return True
 
-    def start(self) -> None:
+    def start(self, start_units: bool = False) -> None:
         """Starts all units, and starts thread."""
         if self.stat != ThreadStat.RELOAD: self.stat = ThreadStat.STARTING
         self._stop_event.clear()
         # Create an "agent" (Runner) and give him a copy of the list of units.
         units_to_run = list(self._units.values())
-        for unit in units_to_run: unit.start()
+        if start_units:
+            for unit in units_to_run: unit.start()
         self._thread = threading.Thread(
             target=self._run_loop, 
             args=(units_to_run,), 
