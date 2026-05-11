@@ -1,9 +1,11 @@
+# sanapo/kernel.py
 from __future__ import annotations
 import queue
 import uuid
 import os
 import json
 from time import perf_counter, sleep
+from typing import Callable
 
 from sanapo.addr import Addr
 from sanapo.config import Config
@@ -12,6 +14,7 @@ from sanapo.thread_manager import ThreadManager
 from sanapo.message_broker import MessageBroker
 from sanapo.kernel_secretary import KernelSecretary
 from sanapo.watch_dog import WatchDog
+from sanapo.boot_master import BootMaster
 from sanapo.secretary import Secretary
 from sanapo.base_unit import BaseUnit
 from sanapo.manifest import Manifest
@@ -33,6 +36,7 @@ class Kernel:
         self._inbox = queue.Queue()
         self._secr = KernelSecretary(self, self._broker)
         self._watchdog = WatchDog(self, self._cfg)
+        self._boot_master = BootMaster(self)
 
         # Recipes
         self._recipes_units: dict[Addr, dict] = {}
@@ -50,7 +54,16 @@ class Kernel:
         self._dump_pending: bool = False
         self._last_sys_consist: float = 0.0
         self._is_running: bool = False
-        self._is_shutting_down: bool = False
+        self._is_shutdowning: bool = False
+        self._is_rebooting: bool = False
+
+        # Booting
+        self._boot_tier_idx = 0        # tier layer_num for start
+        self._boot_global_attempt = 1  # trying of app
+        self._boot_tier_attempt = 1    # triyng of tier
+
+        # Views
+        self.tier_view = KernelTierView(self)
 
     # --- System Configuration (Registration) ---
 
@@ -157,7 +170,7 @@ class Kernel:
 
         # Tier creating
         try:
-            tier = Tier(kernel=self, layer_num=layer_num, name=name, auto=is_auto)
+            tier = Tier(self.tier_view, layer_num, name, is_auto)
             
             # Registy
             self._tiers[tier.layer_num] = tier
@@ -338,18 +351,25 @@ class Kernel:
 
     # --- Lifecycle Controls ---
 
-    def start(self):
+    def restart(self) -> None:
+        """Initiates global system reboot."""
+        self._log.inf("BOOT: Start Rebooting")
+        self._is_rebooting = True
+        self.stop()
+
+    def stop(self) -> None:
+        """Starts the shutdown sequence."""
+        if self._is_shutdowning: return
+        self._is_shutdowning = True
+        self._boot_master.shutdown()
+
+    def start(self) -> None:
         """Starts all managers and initiates tier ignition"""
-        self._log.inf("Ignition sequence started")
-
-        for num in sorted(self._tiers.keys()):
-            tier = self._tiers[num]
-            tier.task = TierTask.STARTING
-            tier._target_units = list(tier._units)
-            # Tier timing will be initialized in Tier.step() or here
+        self._log.inf(f"Ignition sequence started")
         self._is_running = True
+        self._boot_master.ignite()
 
-    def loop(self):
+    def loop(self) -> None:
         """Main conductor loop"""
         while self._is_running:
             start_ts = perf_counter()
@@ -357,6 +377,7 @@ class Kernel:
             self._broker.step() # Route messages
             self._secr._step()  # Process self commands
             for tier in self._tiers.values(): tier.step() # Tier state machine
+            self._boot_master.step() # Load/Shutdown logic checking 
             self._watchdog.inspect() # Health check
             self._sys_consist_check() # Persistence check
             
@@ -462,8 +483,49 @@ class Kernel:
                 return self._sys_consist_load()
             return False
 
-    # --- Callbacks for Tier/WatchDog ---
+    # --- Callbacks ---
 
+    # Callback for BootMaster
+    def on_started(self) -> None:
+        """System is up. Notify project callback."""
+        self._is_shutdowning = False
+        self._log.inf("BOOT: Started successfully")
+        cb = getattr(self, 'project_on_started', None)
+        if cb and callable(cb):
+            try:
+                cb()
+            except Exception as e:
+                self._log.err(f"User startup callback failed: {e}")
+
+    # Callback for BootMaster
+    def on_stopped(self) -> None:
+        """System is down. Manage Reboot or Halt."""
+        self._log.inf("BOOT: Stopped successfully")
+        if self._is_rebooting:
+            self._log.inf("BOOT: Initiating reboot cycle...")
+            self._is_rebooting = False
+            self._is_shutdowning = False
+            self.start()
+        else:
+            cb = getattr(self, 'project_on_stopped', None)
+            if cb and callable(cb):
+                try:
+                    cb()
+                except Exception as e:
+                    self._log.err(f"User shutdown callback failed: {e}")
+            self._is_running = False
+
+    # Callback for Tier
+    def emit_boot_progress(self, text: str, ready: int, total: int):
+        """Bridge method: Kernel -> BootMaster."""
+        self._boot_master.update_sub_progress(text, ready, total)
+    
+    # Callback for Tier
+    def get_manager_by_unit(self, unit: BaseUnit) -> ThreadManager:
+        th_name = self._recipes_units[unit.addr].get("thread", "DEFAULT")
+        return self._threads[th_name]
+    
+    # Callback for Secretary
     def resurrect_frame(self, data: dict) -> Frame:
         """
         Converts raw dictionary to a live Frame object.
@@ -471,42 +533,31 @@ class Kernel:
         """
         return Frame.from_dict(data, self._reg, self._broker)
     
-    def get_managers(self) -> dict[str, ThreadManager]:
-        return self._threads
-
-    def on_progress(self, text, ready, total):
-        self._log.inf(f"BOOT: {text} [{ready}/{total}]")
-
+    # Callback for KernelSecretary TODO
     def handle_new_federation(self, remote_sys: str):
         self._log.inf(f"Federation: System {remote_sys} connected. Ready for unit exchange.")
-
+    
+    # Callback for KernelSecretary TODO
     def register_remote_unit(manifest_data):
         pass
-
-    def rebuild_unit(self, unit: BaseUnit) -> None:
-        pass
-
-    def get_manager_by_unit(self, unit: BaseUnit) -> ThreadManager:
-        th_name = self._recipes_units[unit.addr].get("thread", "DEFAULT")
-        return self._threads[th_name]
-
+    
+    # Callback for WatchDog TODO
+    def get_managers(self) -> dict[str, ThreadManager]:
+        return self._threads
+    
+    # Callback for WatchDog TODO
     def on_thread_stuck(self, manager: ThreadManager, delay: float):
         self._log.crt(f"WatchDog: Thread {manager.name} STUCK for {delay:.2f}s!")
-
+    
+    # Callback for WatchDog TODO
     def on_unit_stuck(self, unit: BaseUnit, u_delay: float, manager: ThreadManager):
         self._log.wrn(f"WatchDog: Unit {unit.addr} STUCK for {u_delay:.2f}s in {manager.name}")
 
 
-    def on_tier_started(self, tier: Tier):
-        self._log.inf(f"Kernel: Tier {tier.name} started successfully.")
-
-    def on_tier_stopped(self, tier: Tier) -> None:
-        pass
-
-    def on_tier_start_fail(self, tier: Tier, problem_units: list[BaseUnit]) -> None:
-        pass
-
-    def on_tier_stop_fail(self, tier: Tier, problem_units: list[BaseUnit]) -> None:
-        pass
-
-
+class KernelTierView:
+    """Limited Kernel API for Tiers to ensure safety and precision."""
+    def __init__(self, kernel: Kernel):
+        self.cfg: Config = kernel._cfg
+        self.rebuild_unit: Callable[[BaseUnit], None] = kernel.rebuild_unit
+        self.get_manager: Callable[[BaseUnit], ThreadManager] = kernel.get_manager_by_unit
+        self.emit_progress: Callable[[str, int, int], None] = kernel.emit_boot_progress

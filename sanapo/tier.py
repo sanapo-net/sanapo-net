@@ -7,33 +7,39 @@ from sanapo.enums import UnitStat, TierTask, ThreadStat
 from sanapo.enums import UnitSource, UnitSelection, ExecutionStrategy
 
 if TYPE_CHECKING:
-    from sanapo.kernel import Kernel
+    from sanapo.kernel import KernelTierView
     from sanapo.config import Config
     from sanapo.logger import Logger
     from sanapo.base_unit import BaseUnit
     from sanapo.thread_manager import ThreadManager
     
 class Tier:
+
+    stopped_stats = [UnitStat.STOPPED, UnitStat.HALTED, UnitStat.DESTROYED]
+    
     """Tier manages unit lifecycle layers with active survival logic."""
     def __init__(self,
-                 kernel: Kernel,
+                 view: KernelTierView,
                  layer_num: int,
                  name: str | None = None, 
                  auto: bool | None = False
             ) -> None:
-        self.kernel: Kernel = kernel
-        self.config: Config = kernel._cfg
+        self.view: KernelTierView = view
+        self.config: Config = view.cfg
         self.layer_num: int = layer_num
         self.name: str = name or f"LAYER_{layer_num}"
         self.autocreated: bool = auto
         self._logger = Logger("TIER_" + name)
         
         self._units: list[BaseUnit] = [] 
-        self._target_units: list[BaseUnit] = []        
+        self._target_units: list[BaseUnit] = []
         self.task = TierTask.NONE
         
+        self.last_result_ok: bool = True
+        self.problem_units: list[BaseUnit] = []
+
         self._unit_start_times: dict[str, float] = {}
-        self._attempts: dict[str, int] = {} 
+        self._attempts: dict[str, int] = {}
 
     def start(self) -> bool:
         if self.task != TierTask.NONE:
@@ -62,7 +68,7 @@ class Tier:
     def _process_starting(self, now: float):
         """Startup escalation logic."""
         for unit in self._target_units:
-            thread: ThreadManager = self.kernel.get_manager_by_unit()
+            thread = self.view.get_manager(unit)
             if thread.stat != ThreadStat.WORKING:
                 thread.start()
             unit.start()
@@ -94,20 +100,20 @@ class Tier:
         self._attempts[unit.addr] = 1
         self._unit_start_times[unit.addr] = now
         t = f"Restarting Unit:{self.name}: {unit.addr}"
-        self.kernel.on_progress(t, self._get_num(), len(self._units))
+        self.view.emit_progress(t, self._get_num(), len(self._units))
 
     def _esc_rebuild(self, unit: BaseUnit, now: float):
         """Attempt 2: Kernel rebuilds unit."""
         self._logger.err(f"{unit.addr}: Reborn failed. Action: REBUILD.")
-        self.kernel.rebuild_unit(unit) 
+        self.view.rebuild_unit(unit) 
         self._attempts[unit.addr] = 2
         self._unit_start_times[unit.addr] = now
         t = f"Rebuilding unit:{self.name}: {unit.addr}"
-        self.kernel.on_progress(t, self._get_num(), len(self._units))
+        self.view.emit_progress(t, self._get_num(), len(self._units))
 
     def _esc_thread_replay(self, unit: BaseUnit, now: float):
         """Attempt 3: Replay the thread."""
-        thread: ThreadManager = self.kernel.get_manager_by_unit(unit)
+        thread = self.view.get_manager(unit)
         # Check for 'living' units from other tiers.
         others = [u for u in thread._units.values() if u != unit]
         is_safe = True
@@ -141,15 +147,15 @@ class Tier:
         if unit in self._target_units:
             self._target_units.remove(unit)
             t = f"{work_text} {self.name}: {unit.addr}"
-            self.kernel.on_progress(t, self._get_num(), len(self._units))
+            self.view.emit_progress(t, self._get_num(), len(self._units))
 
     def _process_stopping(self, now: float):
         """Logic for checking unit shutdown progress."""
         for unit in self._target_units:
-            thread: ThreadManager = self.kernel.get_manager_by_unit(unit)
+            thread = self.view.get_manager(unit)
             unit.stop()
             # Check if unit is already dead or stopped.
-            if unit.stat in [UnitStat.STOPPED, UnitStat.HALTED, UnitStat.DESTROYED]:
+            if unit.stat in self.stopped_stats:
                 if thread: thread.remove_unit(unit.addr)
                 self._finish_unit_task(unit, "Stopped")
                 continue
@@ -174,22 +180,33 @@ class Tier:
         """Finalizes the tier task and reports results to the Kernel."""
         # If no units left in target list, the tier has finished its work.
         if not self._target_units:
-            problem_units = []
+            self.problem_units = []
             for u in self._units:
                 if is_start:
                     if u.stat != UnitStat.WORKING:
-                        problem_units.append(u)
+                        self.problem_units.append(u)
                 else:
-                    if u.stat not in [UnitStat.STOPPED, UnitStat.HALTED, UnitStat.DESTROYED]:
-                        problem_units.append(u)
-            if is_start:
-                if problem_units: self.kernel.on_tier_start_fail(self, problem_units)
-                else: self.kernel.on_tier_started(self)
-            else:
-                if problem_units: self.kernel.on_tier_stop_fail(self, problem_units)
-                else: self.kernel.on_tier_stopped(self)
-
+                    if u.stat not in self.stopped_stats:
+                        self.problem_units.append(u)
+            # Fix results
+            self.last_result_ok = (len(self.problem_units) == 0)
             # Reset tier task.
             self.task = TierTask.NONE
             self._attempts.clear()
             self._unit_start_times.clear()
+
+    def get_progress(self) -> float:
+        """Returns 0.0 to 1.0 progress of the current task."""
+        if not self._units: 
+            return 1.0
+        
+        # Count how many units are already in the required status
+        if self.task == TierTask.STARTING:
+            ready = sum(1 for u in self._units if u.stat == UnitStat.WORKING)
+        elif self.task == TierTask.STOPPING:
+            ready = sum(1 for u in self._units if u.stat in self.stopped_stats)
+        else:
+            return 1.0
+            
+        return ready / len(self._units)
+
