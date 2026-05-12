@@ -56,3 +56,6 @@ class Config():
     # Broker.
     ADDR_BROKER_STR = "BROKER"
     BROKER_BUS_READ_LIMIT = 500
+
+    # BootMaster.
+    BOOT_UI_MODE = "GUI" # "GUI" or "CUI"

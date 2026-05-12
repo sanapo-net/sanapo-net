@@ -9,30 +9,35 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from typing import TYPE_CHECKING
 
+
+from sanapo.addr import Addr
 from sanapo.protocol import Frame
 from sanapo.enums import Logs
 
 if TYPE_CHECKING:
     from sanapo.config import Config
-
-Addr = Enum
+    from sanapo.translator import Translator
 
 class Logger:
     _print_lock = threading.Lock()
-    def __init__(self, addr: Addr | str, config: Config) -> None:
+    def __init__(self, addr: Addr | str, config: Config, translator: Translator) -> None:
         if isinstance(addr, Addr):
-            self._addr = addr.name
+            self._addr = addr.unit
         elif isinstance(addr, str):
             self._addr = addr
         else:
             self._addr = "UNKNOWN"
         self._cfg = config
+        self._translator: Translator = translator
 
         self.file_handler = RotatingFileHandler(
             "sanapo.log", maxBytes=5*1024*1024, backupCount=5, encoding='utf-8'
         )
         
-    def _output(self, level: Logs, text: str, frame: Frame | None = None, mask: str = "") -> None:        
+    def _output(self, level: Logs, text: str, frame: Frame | None = None, mask: str = "",
+                **kwargs) -> None:
+         
+        translated_text = self._translator.translate(text, **kwargs)      
         COLORS = {
             "crt": "\033[41m\033[37m", # white on red
             "err": "\033[91m",         # red
@@ -44,14 +49,14 @@ class Logger:
 
         trc_str = ""
         if level in [Logs.CRT, Logs.ERR]:
-            caller = inspect.stack()[2]
+            caller = inspect.stack()[3]
             filename = caller.filename.split('/')[-1]
             lineno = caller.lineno
             trc_str = f" ({filename}:{lineno})"
 
         time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
         msk_str = self._read_mapping(frame, mask)
-        log_str = f"{time_str} {level.value} {self._addr}: {text}{trc_str}{msk_str}."
+        log_str = f"{time_str} {level.value} {self._addr}: {translated_text}{trc_str}{msk_str}."
 
         # Console.
         if level in self._cfg.DEFAULT_LOG_FLAGS["console"]:
@@ -101,17 +106,17 @@ class Logger:
         else:
             return ""
 
-    def err(self, text: str, frame: Frame | None = None, mask: str = "") -> None:
-        self._output(Logs.ERR, text, frame, mask)
+    def err(self, text: str, frame: Frame | None = None, mask: str = "", **kwargs) -> None:
+        self._output(Logs.ERR, text, frame, mask, **kwargs)
 
-    def crt(self, text: str, frame: Frame | None = None, mask: str = "") -> None:
-        self._output(Logs.CRT, text, frame, mask)
+    def crt(self, text: str, frame: Frame | None = None, mask: str = "", **kwargs) -> None:
+        self._output(Logs.CRT, text, frame, mask, **kwargs)
 
-    def wrn(self, text: str, frame: Frame | None = None, mask: str = "") -> None:
-        self._output(Logs.WRN, text, frame, mask)
+    def wrn(self, text: str, frame: Frame | None = None, mask: str = "", **kwargs) -> None:
+        self._output(Logs.WRN, text, frame, mask, **kwargs)
 
-    def inf(self, text: str, frame: Frame | None = None, mask: str = "") -> None:
-        self._output(Logs.INF, text, frame, mask)
+    def inf(self, text: str, frame: Frame | None = None, mask: str = "", **kwargs) -> None:
+        self._output(Logs.INF, text, frame, mask, **kwargs)
 
-    def dbg(self, text: str, frame: Frame | None = None, mask: str = "") -> None:
-        self._output(Logs.DBG, text, frame, mask)
+    def dbg(self, text: str, frame: Frame | None = None, mask: str = "", **kwargs) -> None:
+        self._output(Logs.DBG, text, frame, mask, **kwargs)

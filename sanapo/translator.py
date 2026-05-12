@@ -7,15 +7,13 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from sanapo.logger import Logger
     from sanapo.config import Config
-    from sanapo.settings import Settings
-
 
 class Translator:
     """Static string translator with key-based lookup from JSON files."""
-    def __init__(self, config: Config, settings: Settings, logger: Logger, lang: str = "en"):
+    def __init__(self, config: Config, logger: Logger, lang: str = "en"):
         self._logger: Logger = logger
         self._lang_dir = config.TRANSLATOR_DIR
-        self._current_lang = lang or settings.UI_LANGUAGE
+        self._current_lang = lang or config.UI_LANGUAGE
         # Dictionary storage: { "Key text": "translated target text" }.
         self._dict: dict[str, str] = {}
         self.load_lang_json(self._current_lang)

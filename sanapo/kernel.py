@@ -1,9 +1,9 @@
 # sanapo/kernel.py
 from __future__ import annotations
-import queue
 import uuid
 import os
 import json
+from queue import Queue
 from time import perf_counter, sleep
 from typing import Callable
 
@@ -15,6 +15,7 @@ from sanapo.message_broker import MessageBroker
 from sanapo.kernel_secretary import KernelSecretary
 from sanapo.watch_dog import WatchDog
 from sanapo.boot_master import BootMaster
+from sanapo.translator import Translator
 from sanapo.secretary import Secretary
 from sanapo.base_unit import BaseUnit
 from sanapo.manifest import Manifest
@@ -26,17 +27,17 @@ from sanapo.enums import ThreadStat, UnitType, EnumRegistry, TierTask, ThreadTyp
 class Kernel:
     """Central Orchestrator of the sanapo framework."""
     def __init__(self, enum_reg: EnumRegistry):
+        # Infrastructure
+        self._reg = enum_reg
         self._cfg: Config = Config()
         self._addr: Addr = Addr(self._cfg.ADDR_KERNEL_STR)
-        self._log: Logger = Logger(self._addr, self._cfg)
-        self._reg = enum_reg
-
-        # Infrastructure
-        self._broker = MessageBroker(self._cfg, self._log, enum_reg)
-        self._inbox = queue.Queue()
-        self._secr = KernelSecretary(self, self._broker)
-        self._watchdog = WatchDog(self, self._cfg)
-        self._boot_master = BootMaster(self)
+        self._inbox: Queue = Queue()
+        self._secr: KernelSecretary = KernelSecretary(self, self._broker)
+        self._watchdog: WatchDog = WatchDog(self, self._cfg)
+        self._boot_master: BootMaster = BootMaster(KernelBootMasterView(self))
+        self._translator: Translator = Translator()
+        self._log: Logger = Logger(self._addr, self._cfg, self._translator)
+        self._broker: MessageBroker = MessageBroker(self._cfg, self._log, enum_reg)
 
         # Recipes
         self._recipes_units: dict[Addr, dict] = {}
@@ -268,7 +269,7 @@ class Kernel:
             return None
         # Logger.
         try:
-            logger = Logger(name, self._cfg)
+            logger = Logger(name, self._cfg, self._translator)
         except (TypeError, ValueError, AttributeError) as e:
             self._log.err("Unit not assembled. Didn't get Logger (Name={n}): {e}", n=name, e=e)
             return None
@@ -277,7 +278,7 @@ class Kernel:
             secr = Secretary(
                 address=addr,
                 outbox=self._broker.bus,
-                inbox=queue.Queue(),
+                inbox=Queue(),
                 config=self._cfg,
                 logger=logger,
                 evt_class=self._reg.evt,
@@ -561,3 +562,14 @@ class KernelTierView:
         self.rebuild_unit: Callable[[BaseUnit], None] = kernel.rebuild_unit
         self.get_manager: Callable[[BaseUnit], ThreadManager] = kernel.get_manager_by_unit
         self.emit_progress: Callable[[str, int, int], None] = kernel.emit_boot_progress
+
+class KernelBootMasterView:
+    """Limited Kernel API for Tiers to ensure safety and precision."""
+    def __init__(self, kernel: Kernel):
+        self.cfg: Config = kernel._cfg
+        self.log: Logger = kernel._log
+        self.tiers: dict[int, Tier] = kernel._tiers
+        self.translate: Callable[..., str] = kernel._translator.translate
+        self.restart: Callable[[None], None] = kernel.restart
+        self.on_started: Callable[[None], None] = kernel.on_started
+        self.on_stopped: Callable[[None], None] = kernel.on_stopped

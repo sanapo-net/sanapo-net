@@ -33,6 +33,12 @@ class TierTask(Enum):
     STARTING = "starting"
     STOPPING = "stopping"
 
+# BootMaster
+class MasterMode(Enum):
+    IDLE = "idle"
+    BOOTING = "booting"
+    SHUTDOWN = "shutdown"
+
 # Protocol
 @unique
 class MsgType(str, Enum):
