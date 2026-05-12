@@ -143,30 +143,48 @@ class MessageBroker:
             )
             self._deliver(report, frame.sender)
 
-    def get_addr(self, addr_str: str) -> Addr | None:
+    def find_addr(self, addr_str: str) -> Addr | None:
         """
-        Normalizes and returns a singleton Addr object.
-        Replaces local system name with 'LOCAL'.
+        Only looks up existing addresses in the registry. 
+        Does NOT create new objects.
         """
+        temp = Addr.from_str(addr_str)
+        if not temp: return None
+        # Normalize: if system matches local config, look for 'LOCAL'
+        sys_part = "LOCAL" if temp.system == self._cfg.SYSTEM_NAME else temp.system
+        cache_key = f"{sys_part}:{temp.unit}"
+        return self._addr_book.get(cache_key)
+
+    def ensure_addr(self, addr_str: str) -> Addr | None:
+        """
+        Returns an existing Addr or creates a new one if not found.
+        Guarantees an Addr object return for valid strings.
+        """
+        # Try to find existing first
+        existing = self.find_addr(addr_str)
+        if existing:
+            return existing
+        
+        # If not found, use creation logic (without duplicate check)
         temp_addr = Addr.from_str(addr_str)
         if not temp_addr: return None
         
-        sys_part = temp_addr.system
-        if sys_part == self._cfg.SYSTEM_NAME:
-            sys_part = "LOCAL"
-            need_new_addr = True
-            
-        cache_key = f"{sys_part}:{temp_addr.unit}"
+        sys_part = "LOCAL" if temp_addr.system == self._cfg.SYSTEM_NAME else temp_addr.system
+        addr = Addr(unit=temp_addr.unit, system=sys_part)
         
-        if cache_key not in self._addr_book:
-            if need_new_addr:
-                addr = Addr(unit=temp_addr.unit, system=sys_part)
-            else:
-                addr = temp_addr
-            self._addr_book[cache_key] = addr
-            return addr
-        else:
+        cache_key = f"{sys_part}:{temp_addr.unit}"
+        self._addr_book[cache_key] = addr
+        return addr
+
+    def create_addr(self, addr_str: str) -> Addr | None:
+        """
+        Attempts to register a NEW unique address. 
+        Returns None if the address already exists.
+        """
+        if self.find_addr(addr_str):
             return None
+        return self.ensure_addr(addr_str)
+
         
     def deregister_addr(self, addr:Addr) -> bool:
         cache_key = f"{addr.system}:{addr.unit.unit}"

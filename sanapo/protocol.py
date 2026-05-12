@@ -112,13 +112,13 @@ class Frame:
 
         frame = cls(
             msg_type=m_type,
-            sender=broker.get_addr(data["sender"]), 
+            sender=broker.ensure_addr(data["sender"]), 
             payload=data.get("payload", {}),
             sys_type=get_e(reg.sys, sub_val) if m_type == MsgType.SYS else None,
             evt_type=get_e(reg.evt, sub_val) if m_type == MsgType.EVT else None,
             cmd_type=get_e(reg.cmd, sub_val) if m_type == MsgType.CMD else None,
             rpt_type=get_e(reg.rpt, sub_val) if m_type == MsgType.RPT else None,
-            recipient=broker.get_addr(data["recipient"]) if data.get("recipient") else None,
+            recipient=broker.ensure_addr(data["recipient"]) if data.get("recipient") else None,
             cmd_id=data.get("cmd_id"),
             reason=get_e(reg.reason, data.get("reason")),
             deadline=data.get("deadline"),
@@ -142,13 +142,13 @@ class Frame:
         # Fast mapping without deep validation of payload structure
         return cls(
             msg_type=m_type,
-            sender=broker.get_addr(data["sender"]),
+            sender=broker.ensure_addr(data["sender"]),
             payload=data.get("payload", {}), # Keep payload as raw dict/data
             sys_type=reg.sys(sub_val) if m_type == MsgType.SYS else None,
             evt_type=reg.evt(sub_val) if m_type == MsgType.EVT else None,
             cmd_type=reg.cmd(sub_val) if m_type == MsgType.CMD else None,
             rpt_type=reg.rpt(sub_val) if m_type == MsgType.RPT else None,
-            recipient=broker.get_addr(data.get("recipient")) if data.get("recipient") else None,
+            recipient=broker.ensure_addr(data.get("recipient")) if data.get("recipient") else None,
             cmd_id=data.get("cmd_id"),
             reason=reg.reason(data.get("reason")) if data.get("reason") else None,
             deadline=data.get("deadline"),

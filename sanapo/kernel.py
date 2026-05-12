@@ -5,7 +5,6 @@ import os
 import json
 from queue import Queue
 from time import perf_counter, sleep
-from typing import Callable
 
 from sanapo.addr import Addr
 from sanapo.config import Config
@@ -21,8 +20,9 @@ from sanapo.base_unit import BaseUnit
 from sanapo.manifest import Manifest
 from sanapo.protocol import Frame
 from sanapo.tier import Tier
+from sanapo.views import KernelTierView, KernelBootMasterView, KernelUserView
 from sanapo.transport.adapters.queue import QueueAdapterTransport
-from sanapo.enums import ThreadStat, UnitType, EnumRegistry, TierTask, ThreadType
+from sanapo.enums import UnitType, EnumRegistry, ThreadType
 
 class Kernel:
     """Central Orchestrator of the sanapo framework."""
@@ -263,7 +263,7 @@ class Kernel:
         """Unit factory: from recipe to living object"""
         name = cfg["name"]
         # Addr.
-        addr = self._broker.get_addr(name)
+        addr = self._broker.create_addr(name)
         if not addr:
             self._log.err("Unit not assembled. Didn't get Addr. (Name={n})", n=name)
             return None
@@ -349,6 +349,96 @@ class Kernel:
         new_unit = self._build_unit(recipe)
         self._units[addr] = new_unit
         self._log.inf("Unit {name} was rebuiled", name=unit.addr.unit)
+    
+    # --- Delletions ---
+
+    def del_unit(self, addr: Addr | str) -> bool:
+        """
+        Gracefully stops and removes a unit from all registries.
+        Returns True if the removal process was initiated, False if not found.
+        """
+        # 1. Resolve address using our new 'find_addr'
+        target_addr = self._broker.find_addr(addr) if isinstance(addr, str) else addr
+        unit = self._units.get(target_addr)
+        
+        if not unit:
+            self._log.wrn("Removal failed: Unit {a} not found.", a=addr)
+            return False
+
+        # 2. Signal the unit to stop (V1: no deadline waiting here)
+        unit.stop()
+
+        # 3. Remove from Thread Manager
+        manager = self.get_manager_by_unit(unit)
+        if manager:
+            manager.remove_unit(str(target_addr.unit))
+
+        # 4. Remove from its Tier
+        for tier in self._tiers.values():
+            if unit in tier._units:
+                tier._units.remove(unit)
+
+        # 5. Final cleanup in Kernel and Broker
+        self._destrioy_unit(unit) # Calls unit.destroy() and broker.deregister_addr
+        self._units.pop(target_addr, None)
+        self._recipes_units.pop(target_addr, None)
+
+        self._log.inf("Unit {n} removed from system.", n=target_addr.unit)
+        self._sys_consist_changed()
+        return True
+
+    def del_tier(self, layer_num: int | None = None, name: str | None = None) -> bool:
+        """
+        Removes a Tier only if it contains no units.
+        Returns True on success, False if tier is not empty or not found.
+        """
+        tier = self._tiers.get(layer_num) or self._tiers_by_name.get(name)
+        
+        if not tier:
+            self._log.wrn("Removal failed: Tier {n}|{l} not found.", n=name, l=layer_num)
+            return False
+
+        if tier._units:
+            self._log.err("Cannot delete Tier {n}: it is not empty!", n=tier.name)
+            return False
+
+        # Remove from all internal indexes
+        self._tiers.pop(tier.layer_num, None)
+        self._tiers_by_name.pop(tier.name, None)
+        self._recipes_tiers.pop(tier.layer_num, None)
+        
+        self._log.inf("Tier {n} (Layer {l}) deleted.", n=tier.name, l=tier.layer_num)
+        self._sys_consist_changed()
+        return True
+
+    def del_thread(self, name: str) -> bool:
+        """
+        Stops and removes a ThreadManager only if no units are assigned to it.
+        Returns True on success, False if busy or not found.
+        """
+        manager = self._threads.get(name)
+        
+        if not manager:
+            self._log.wrn("Removal failed: Thread {n} not found.", n=name)
+            return False
+
+        if manager._units:
+            self._log.err("Cannot delete Thread {n}: units are still assigned!", n=name)
+            return False
+
+        try:
+            # Shutdown the OS thread before removing the manager
+            manager.join(timeout=1.0) 
+            
+            self._threads.pop(name)
+            self._recipes_threads.pop(name, None)
+            
+            self._log.inf("Thread Manager {n} stopped and removed.", n=name)
+            self._sys_consist_changed()
+            return True
+        except Exception as e:
+            self._log.crt("Error deleting thread {n}: {e}", n=name, e=e)
+            return False
 
     # --- Lifecycle Controls ---
 
@@ -554,22 +644,3 @@ class Kernel:
     def on_unit_stuck(self, unit: BaseUnit, u_delay: float, manager: ThreadManager):
         self._log.wrn(f"WatchDog: Unit {unit.addr} STUCK for {u_delay:.2f}s in {manager.name}")
 
-
-class KernelTierView:
-    """Limited Kernel API for Tiers to ensure safety and precision."""
-    def __init__(self, kernel: Kernel):
-        self.cfg: Config = kernel._cfg
-        self.rebuild_unit: Callable[[BaseUnit], None] = kernel.rebuild_unit
-        self.get_manager: Callable[[BaseUnit], ThreadManager] = kernel.get_manager_by_unit
-        self.emit_progress: Callable[[str, int, int], None] = kernel.emit_boot_progress
-
-class KernelBootMasterView:
-    """Limited Kernel API for Tiers to ensure safety and precision."""
-    def __init__(self, kernel: Kernel):
-        self.cfg: Config = kernel._cfg
-        self.log: Logger = kernel._log
-        self.tiers: dict[int, Tier] = kernel._tiers
-        self.translate: Callable[..., str] = kernel._translator.translate
-        self.restart: Callable[[None], None] = kernel.restart
-        self.on_started: Callable[[None], None] = kernel.on_started
-        self.on_stopped: Callable[[None], None] = kernel.on_stopped
