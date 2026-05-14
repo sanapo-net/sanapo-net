@@ -13,18 +13,23 @@ class KernelSecretary(Secretary):
     """
     Specialized Secretary for the Kernel.
     Focused on SYSTEM signals but inherits full communication capabilities.
-    """
+    """  
+
     def __init__(self, kernel: Kernel, broker: MessageBroker):
         super().__init__(
-            address=kernel._cfg.ADDR_KERNEL,
+            address=kernel._addr,
             outbox=broker.bus,
             inbox=kernel._inbox,
             config=kernel._cfg,
             logger=kernel._log,
-            enum_reg=broker.enum_reg,
-            broker=broker
+            evt_class=kernel._reg.evt,
+            cmd_class=kernel._reg.cmd,
+            resurrect_func=kernel.resurrect_frame
         )
         self._kernel = kernel
+
+    def auto_subscribe(self) -> None:
+        pass
 
     def _process_system(self, frame: Frame) -> bool:
         """

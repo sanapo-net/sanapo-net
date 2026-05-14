@@ -126,9 +126,10 @@ class ThreadStat(Enum):
     CREATED = "created"
     STARTING = "starting"
     WORKING = "working"
-    RELOAD = "reload"
+    RELOADING = "reloading"
     JOINING = "joining"
     JOINED = "joined"
+    HALTED = "halted"
 
 @unique
 class UnitSource(Enum): # WHERE TO TAKE FROM (Source of objects)

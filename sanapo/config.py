@@ -27,8 +27,9 @@ class Config():
     # ThreadManager.
     THREAD_TCT_DEFAULT = 0.02
     THREAD_TCT_HIBERNATE_DEFAULT = 0.1
+    THREAD_STEP_TIMEOUT_DEFAULT = 0.1
     THREAD_JOIN_MARGIN = 2
-    FPS_MODE = True
+    FPS_MODE = False
     HIBERNATE_MODE = True
 
     # BaseUnit.
@@ -58,4 +59,4 @@ class Config():
     BROKER_BUS_READ_LIMIT = 500
 
     # BootMaster.
-    BOOT_UI_MODE = "GUI" # "GUI" or "CUI"
+    BOOT_UI_MODE = "CUI" # "GUI" or "CUI"

@@ -1,42 +1,33 @@
-# sanapo/manifest.py
+from __future__ import annotations
 from dataclasses import dataclass, field, asdict
-from typing import Set, Dict, Any
-from sanapo.enums import UnitRole
-from sanapo.addr import Addr
+from typing import TYPE_CHECKING
 
-@dataclass(frozen=True)
+if TYPE_CHECKING:
+    from sanapo.addr import Addr
+
+@dataclass
 class Manifest:
     """Unit Passport. Defines identity, capabilities, and access levels."""
     uid: str                 # Unique instance ID (UUID)
     sid: str                 # System Name (from Config)
     addr: Addr               # Logic Address object
     version: str             # Logic/Module version
+    role: str                # Role in system (e.g., 'worker', 'gateway')
     
-    # Capabilities
-    tags: Set[str] = field(default_factory=set) 
-    role: str
+    # Capabilities (Set of skill tags)
+    tags: set[str] = field(default_factory=set) 
     
     # Flags
     is_public: bool = False      # Share with other systems?
     is_autonomous: bool = False  # Passive/Slave mode?
-    is_persistent: bool = False  # Is it needed save system consistent?
+    is_persistent: bool = True   # Save to dump for system consistency?
     
     # Security
     auth_key: str = ""           # Future crypto signatures
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Serializes manifest for network exchange."""
+    def to_dict(self) -> dict[str, any]:
+        """Serializes manifest to primitive types for network/disk exchange."""
         data = asdict(self)
-        data['addr'] = str(self.addr) # Addr object to "System:Unit" string
-        data['role'] = self.role
-        data['tags'] = list(self.tags) # set is not JSON serializable
+        data['addr'] = str(self.addr)  # Convert Addr object to "System:Unit" string
+        data['tags'] = list(self.tags) # Convert set to JSON-serializable list
         return data
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any], current_sys: str = None) -> 'Manifest':
-        """Reconstructs manifest from dictionary with smart address normalization."""
-        data['addr'] = Addr.from_str(data['addr'], current_sys)
-        data['role'] = data.get('role', "default")
-        data['tags'] = set(data.get('tags', []))
-        return cls(**data)
-

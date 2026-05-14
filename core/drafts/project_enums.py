@@ -9,7 +9,7 @@ class SpeedShiftICMP(int, Enum):
     FASTER = -1
     
 @unique
-class Priority(int, Enum):
+class Priority(str, Enum):
     HIGH  = "high"
     MEDIUM  = "medium"
     LOW = "low"

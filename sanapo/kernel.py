@@ -27,18 +27,6 @@ from sanapo.enums import UnitType, EnumRegistry, ThreadType
 class Kernel:
     """Central Orchestrator of the sanapo framework."""
     def __init__(self, enum_reg: EnumRegistry):
-        # Infrastructure
-        self._reg = enum_reg
-        self._cfg: Config = Config()
-        self._addr: Addr = Addr(self._cfg.ADDR_KERNEL_STR)
-        self._inbox: Queue = Queue()
-        self._secr: KernelSecretary = KernelSecretary(self, self._broker)
-        self._watchdog: WatchDog = WatchDog(self, self._cfg)
-        self._boot_master: BootMaster = BootMaster(KernelBootMasterView(self))
-        self._translator: Translator = Translator()
-        self._log: Logger = Logger(self._addr, self._cfg, self._translator)
-        self._broker: MessageBroker = MessageBroker(self._cfg, self._log, enum_reg)
-
         # Recipes
         self._recipes_units: dict[Addr, dict] = {}
         self._recipes_threads: dict[str, dict] = {}
@@ -62,6 +50,19 @@ class Kernel:
         self._boot_tier_idx = 0        # tier layer_num for start
         self._boot_global_attempt = 1  # trying of app
         self._boot_tier_attempt = 1    # triyng of tier
+
+        # Infrastructure
+        self._reg = enum_reg
+        self._cfg: Config = Config()
+        self._addr: Addr = Addr(self._cfg.ADDR_KERNEL_STR)
+        self._log: Logger = Logger(self._addr, self._cfg)
+        self._translator: Translator = Translator(self._cfg, self._log)
+        self._log.set_translator(self._translator)
+        self._inbox: Queue = Queue()
+        self._watchdog: WatchDog = WatchDog(self, self._cfg)
+        self._boot_master: BootMaster = BootMaster(KernelBootMasterView(self))
+        self._broker: MessageBroker = MessageBroker(self._cfg, self._log, enum_reg)
+        self._secr: KernelSecretary = KernelSecretary(self, self._broker)
 
         # Views
         self.tier_view = KernelTierView(self)
@@ -90,7 +91,13 @@ class Kernel:
         del params['self']
         filtered_params = {k: v for k, v in params.items() if v is not None}
         try:
-            thread = ThreadManager(self._cfg, **filtered_params)
+            name = filtered_params.get('name')
+            if not name:
+                name = "UNKNOW"
+                self._log.err("Creating ThreadManager with out name")
+            addr = f"THREAD_{name}"
+            logger = Logger(addr, self._cfg, self._translator)
+            thread = ThreadManager(self._cfg, logger, **filtered_params)
             self._threads[name] = thread
             self._recipes_threads[name] = filtered_params
         except (TypeError, ValueError, AttributeError) as e:
@@ -140,6 +147,7 @@ class Kernel:
         """
         # Try to find existing tier
         if name and name not in (None, "NEW_CREATE", "AUTO_CREATE", "LAST"):
+            tier = None
             if name in self._tiers_by_name:
                 tier = self._tiers_by_name[name]
             if not tier and layer_num:
@@ -168,10 +176,16 @@ class Kernel:
             else:
                 self._last_tier_num += 1
                 layer_num = self._last_tier_num
+        
+        # Name + Logger
+        if name in (None, "NEW_CREATE", "AUTO_CREATE"):
+            name = f"LAYER_{layer_num}"
+        
 
         # Tier creating
         try:
-            tier = Tier(self.tier_view, layer_num, name, is_auto)
+            logger = Logger(f"TIER_{name}", self._cfg, self._translator)
+            tier = Tier(self.tier_view, logger, layer_num, name, is_auto)
             
             # Registy
             self._tiers[tier.layer_num] = tier
@@ -208,7 +222,7 @@ class Kernel:
         params = locals()
         del params['self']
         filtered_params = {k: v for k, v in params.items() if v is not None}
-        unit = self._build_unit(**filtered_params)
+        unit = self._build_unit(filtered_params)
         if not unit:
             return False
         else:
@@ -240,7 +254,7 @@ class Kernel:
                     t = "Unit {u} is created, but tier {t} is not auto-created. Unit del:{d}"
                     self._log.crt(t, u=addr.unit, t=f"{tier_name}|{tier_layer}", d=delleting)
                     return False
-            self._tiers[tier_name]._units.append(unit)
+            tier._units.append(unit)
             
             self._units[addr] = unit
             self._recipes_units[addr] = filtered_params
@@ -613,7 +627,7 @@ class Kernel:
     
     # Callback for Tier
     def get_manager_by_unit(self, unit: BaseUnit) -> ThreadManager:
-        th_name = self._recipes_units[unit.addr].get("thread", "DEFAULT")
+        th_name = self._recipes_units[unit.addr].get("thread_name", "DEFAULT")
         return self._threads[th_name]
     
     # Callback for Secretary

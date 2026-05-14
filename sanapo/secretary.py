@@ -72,6 +72,7 @@ class Secretary:
         # {cmd_id: {deadline, sender}}.
         self._cmd_in: dict[CmdId, dict[str, any]] = {}
 
+    def auto_subscribe(self) -> None:
         self._handlers_sys: dict[SysType, callable] = {
             SysType.U_START: self._unit.start,
             SysType.U_SLEEP: self._unit.sleep,
@@ -451,6 +452,7 @@ class Secretary:
             self._logger.err(f"[Secr]: set_unit: Detected second set! Obj: {unit}")
             return False
         self._unit = unit
+        self.auto_subscribe()
         return True
 
     def _step(self) -> bool:

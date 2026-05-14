@@ -3,11 +3,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from sanapo.base_unit import BaseUnit
+    from sanapo.base_unit import UnitModuleView
 
 class BaseModule:
-    def __init__(self, u: BaseUnit, **params):
-        self._u: BaseUnit = u
+    def __init__(self, u: UnitModuleView, **params):
+        self._u: UnitModuleView = u
         self._is_running = True
         self._is_paused = False
 
@@ -38,4 +38,5 @@ class BaseModule:
         # self._u.start_timeout = 0.5
         # self._u.stop_timeout = 2
         # self._u.step_timeout = 0.2
+        self._u.started()
         pass

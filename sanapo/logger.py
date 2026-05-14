@@ -20,24 +20,36 @@ if TYPE_CHECKING:
 
 class Logger:
     _print_lock = threading.Lock()
-    def __init__(self, addr: Addr | str, config: Config, translator: Translator) -> None:
+    def __init__(self,
+                addr: Addr | str,
+                config: Config,
+                translator: Translator | None = None
+            ) -> None:
         if isinstance(addr, Addr):
             self._addr = addr.unit
         elif isinstance(addr, str):
             self._addr = addr
         else:
             self._addr = "UNKNOWN"
+        self._addr = f"[{addr}]"
         self._cfg = config
-        self._translator: Translator = translator
+        self._translator: Translator | None = translator
 
         self.file_handler = RotatingFileHandler(
             "sanapo.log", maxBytes=5*1024*1024, backupCount=5, encoding='utf-8'
         )
         
+    def set_translator(self, translator: Translator) -> None:
+        self._translator = translator
+
     def _output(self, level: Logs, text: str, frame: Frame | None = None, mask: str = "",
                 **kwargs) -> None:
-         
-        translated_text = self._translator.translate(text, **kwargs)      
+        
+        if self._translator:
+            translated_text = self._translator.translate(text, **kwargs)
+        else:
+            translated_text = text.format(**kwargs) if kwargs else text
+
         COLORS = {
             "crt": "\033[41m\033[37m", # white on red
             "err": "\033[91m",         # red

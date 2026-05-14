@@ -3,7 +3,8 @@ from __future__ import annotations
 from time import perf_counter
 from typing import TYPE_CHECKING
 
-from sanapo.enums import UnitStat
+from sanapo.enums import UnitStat, ThreadStat
+
 if TYPE_CHECKING:
     from sanapo.kernel import Kernel
     from sanapo.config import Config
@@ -23,14 +24,16 @@ class WatchDog:
         self._last_step = now
 
         for manager in self.kernel.get_managers().values():
+            if manager.stat != ThreadStat.WORKING:
+                continue
             delay = now - manager.last_step
-            
             # If the flow is delayed, but not yet critical.
             margin = max(self.tct * 1.5, self.tct + manager._tct_hibernate)
             if delay > manager.step_timeout - margin:
                 # We give the manager a command to recheck their timeouts
                 # (in case the user raised them).
                 manager._update_step_timeout()
+            
                 
             # Final check.
             if delay > manager.step_timeout:

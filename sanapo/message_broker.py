@@ -5,11 +5,11 @@ from typing import TYPE_CHECKING, Optional
 
 from sanapo.enums import MsgType, SysType, RptType, RptReason
 from sanapo.protocol import Frame
+from sanapo.addr import Addr
 
 if TYPE_CHECKING:
     from sanapo.config import Config
     from sanapo.logger import Logger
-    from sanapo.addr import Addr
     from sanapo.enums import EnumRegistry
     from sanapo.transport.adapters import BaseAdapterTransport
     from sanapo.transport.services.tcp import TcpService

@@ -10,7 +10,7 @@ class CUIBootDriver(BaseBootUI):
     """Console dual-bar driver"""
     def __init__(self):
         self._bar_len = 50
-        self._data: dict[str, dict[str, any]] = {"APP":{"p":0, "t":""}, "Tier":{"p":0, "t":""}}
+        self._data: dict[str, dict[str, any]] = {"APP":{"p":0, "t":""}, "TIER":{"p":0, "t":""}}
         sys.stdout.write("\n\n")
         sys.stdout.flush()
 
@@ -30,12 +30,14 @@ class CUIBootDriver(BaseBootUI):
         sys.stdout.write(f"\033[4F\r")
         for k, v in self._data.items():
             k = (k+":").ljust(5)
-            sys.stdout.write(f"{k} [{self._make_bar(v["p"])}] {int(v["p"])}%\n")
-            sys.stdout.write(f"      {v["t"]:<50}\n")
+            sys.stdout.write(f"{k} [{self._make_bar(v['p'])}] {int(v['p'])}%\n")
+            sys.stdout.write(f"      {v['t']:<50}\n")
             sys.stdout.flush()
 
-    def close(self):
-        sys.stdout.write("\n\n--- Done ---\n")
+    def close(self, doing: str = " "):
+        if doing:
+            doing = f" {doing}"
+        sys.stdout.write(f"\n---{doing} Done ---\n")
         sys.stdout.flush()
 
 

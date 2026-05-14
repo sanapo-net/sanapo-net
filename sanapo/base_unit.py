@@ -1,11 +1,11 @@
 # sanapo/base_unit.py
 from __future__ import annotations
 from time import perf_counter
-from enum import Enum
 from typing import TYPE_CHECKING
 
+from sanapo.enums import UnitType, UnitStat
+
 if TYPE_CHECKING:
-    from sanapo.enums import UnitType, UnitStat
     from sanapo.config import Config
     from sanapo.logger import Logger
     from sanapo.secretary import Secretary
@@ -37,13 +37,22 @@ class BaseUnit():
         self.stat: UnitStat = UnitStat.CREATING
 
         self._is_destroying: bool = False
-        self._needs_rebirth = False
-        self._stop_deadline: float | None = None
-        self.start_timeout:float = config.UNIT_START_TIMEOUT
+        self._needs_rebirth: bool = False
+        self._needs_start: bool = False
+        self._needs_stop: bool = False
+
+        self._deadline: float | None = None
         self.stop_timeout: float = config.UNIT_STOP_TIMEOUT
         self.step_timeout: float = config.UNIT_STEP_TIMEOUT
+        self.start_timeout:float = config.UNIT_START_TIMEOUT
         self._last_step: float = perf_counter()
         self._step_map = {
+            UnitStat.STARTING: {
+                UnitType.UTILITY: [0,0],
+                UnitType.SIGMA: [0,1],
+                UnitType.ZOMBIE: [1,0],
+                UnitType.TICKABLE: [1,1],
+            },
             UnitStat.WORKING: {
                 UnitType.UTILITY: [0,0],
                 UnitType.SIGMA: [0,1],
@@ -65,8 +74,14 @@ class BaseUnit():
         Returns True if module was created.
         """
         try:
+            view = UnitModuleView(self)
+        except Exception as e:
+            self.stat = UnitStat.HALTED
+            self.logger.err(f"Failed to create UnitModuleView instance: {e}")
+            return False
+        try:
             # The module accesses everything through a single unit object.
-            self._module = self._module_class(self, **self._module_params)
+            self._module = self._module_class(view, **self._module_params)
             self.stat = UnitStat.CREATED
             return True
         except Exception as e:
@@ -84,7 +99,6 @@ class BaseUnit():
                 if force:
                     self._module.stop() 
                     self._module = None
-                    return True
                 else:
                     # Soft stop. Creation only after STOPPED or stop_timeout.
                     self._needs_rebirth = True
@@ -103,15 +117,29 @@ class BaseUnit():
 
     def step(self) -> bool:
         now = perf_counter()
+
         self._last_step = now
         if self._is_destroying:
             self.destroy()
             return False
+        
+        if self.stat == UnitStat.STARTING:
+            if self._needs_start:
+                self._module.start()
+                self._needs_start = False
+            if self._deadline and now >= self._deadline:
+                self.stat = UnitStat.WORKING
+                self._deadline = None
+                self.logger.inf(f"Forced to STARTED by timeout")
+                return False
 
         if self.stat == UnitStat.STOPPING:
-            if self._stop_deadline and now >= self._stop_deadline:
+            if self._needs_stop:
+                self._module.stop()
+                self._needs_stop = False
+            if self._deadline and now >= self._deadline:
                 self.stat = UnitStat.STOPPED
-                self._stop_deadline = None
+                self._deadline = None
                 self.logger.inf(f"Forced to STOPPED by timeout")
                 return False
         
@@ -132,25 +160,28 @@ class BaseUnit():
                 was_work = True
         return was_work
 
-    def start(self) -> bool:
+    def start(self, timeout: float | None = None) -> None:
+        if self.stat in (UnitStat.STARTING, UnitStat.WORKING):
+            return
         self.stat = UnitStat.STARTING
-        self._module.start()
-        return True
+        self._needs_start = True
+        timeout = timeout if timeout else self.start_timeout
+        self._deadline = perf_counter() + timeout
     
-    def sleep(self) -> bool:
-        self.stat = UnitStat.SLEEPING
-        return True
-
-    def wakeup(self) -> bool:
+    def started(self) -> None:
         self.stat = UnitStat.WORKING
-        return True
+    
+    def sleep(self) -> None:
+        self.stat = UnitStat.SLEEPING
 
-    def stop(self, timeout: float | None = None) -> bool:
-        timeout = timeout if timeout else self.stop_timeout
+    def wakeup(self) -> None:
+        self.stat = UnitStat.WORKING
+
+    def stop(self, timeout: float | None = None) -> None:
         self.stat = UnitStat.STOPPING
-        self._stop_deadline = perf_counter() + timeout
-        self._module.stop()
-        return True
+        self._needs_stop = True
+        timeout = timeout if timeout else self.stop_timeout
+        self._deadline = perf_counter() + timeout
 
     def destroy(self) -> bool:
         dont_work = [UnitStat.CREATED, UnitStat.STOPPED, UnitStat.DESTROYED, UnitStat.HALTED]
@@ -182,3 +213,63 @@ class BaseUnit():
             self.type = new_type
             self.logger.dbg(f"Change UnitType to {new_type}, and modile is not BaseModule type")
             return True
+
+class UnitModuleView:
+    """Safe API for a Module to interact with its Unit container."""
+    def __init__(self, unit: BaseUnit):
+        self._unit: BaseUnit = unit
+
+        # --- Shortened Tools ---
+        self.cfg: Config = unit.config
+        self.log: Logger = unit.logger
+        self.scr: Secretary = unit.secr
+        self.addr: Addr = unit.addr
+
+        # --- Status Control Signals ---
+        self.started = unit.started # Switch to WORKING
+        self.sleep = unit.sleep     # Switch to SLEEPING
+        self.wakeup = unit.wakeup   # Switch to WORKING
+
+    # --- Read-only Properties ---
+    @property
+    def stat(self) -> UnitStat:
+        """Current status of the unit. / Текущий статус юнита."""
+        return self._unit.stat
+
+    @property
+    def type(self) -> UnitType:
+        """Execution type of the unit. / Тип исполнения юнита."""
+        return self._unit.type
+
+    @property
+    def manifest(self) -> Manifest:
+        """Unit passport data. / Паспортные данные юнита."""
+        return self._unit.manifest
+
+    # --- Timeouts ---
+    @property
+    def start_timeout(self) -> float:
+        return self._unit.start_timeout
+
+    @start_timeout.setter
+    def start_timeout(self, value: float) -> None:
+        """Allows module to adjust deadline before a heavy operation."""
+        self._unit.start_timeout = value
+
+    @property
+    def stop_timeout(self) -> float:
+        return self._unit.stop_timeout
+
+    @stop_timeout.setter
+    def stop_timeout(self, value: float) -> None:
+        """Allows module to adjust stop deadline dynamically."""
+        self._unit.stop_timeout = value
+
+    @property
+    def step_timeout(self) -> float:
+        return self._unit.step_timeout
+
+    @step_timeout.setter
+    def step_timeout(self, value: float) -> None:
+        """Adjusts the single step processing timeout execution loop."""
+        self._unit.step_timeout = value

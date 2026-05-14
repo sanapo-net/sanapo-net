@@ -5,11 +5,10 @@ from typing import TYPE_CHECKING
 
 from sanapo.enums import TierTask, MasterMode
 from sanapo.boot_ui import CUIBootDriver, GUIBootDriver
-from sanapo.kernel import KernelBootMasterView
 
 if TYPE_CHECKING:
-    from sanapo.kernel import Kernel
     from sanapo.tier import Tier
+    from sanapo.kernel import KernelBootMasterView
 
 class BootMaster:
     """Manages staged startup/shutdown with 2x2 retry logic."""
@@ -186,7 +185,7 @@ class BootMaster:
         if self._ui:
             msg = self.view.translate("Finished ({d:.2f}sec)", d=duration)
             self._ui.update_global(100.0, msg)
-            self._ui.close()
+            self._ui.close(prev_mode.value)
             self._ui = None
         if prev_mode == MasterMode.BOOTING:
             self.view.on_started()

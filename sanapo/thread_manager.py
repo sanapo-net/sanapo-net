@@ -2,7 +2,6 @@
 from __future__ import annotations
 import threading
 import queue
-from enum import Enum
 from time import perf_counter
 from typing import TYPE_CHECKING
 
@@ -14,20 +13,21 @@ if TYPE_CHECKING:
     from sanapo.config import Config
     from sanapo.logger import Logger
     from sanapo.base_unit import BaseUnit
+    from sanapo.addr import Addr
 
-Addr = Enum
 
 class ThreadManager:
     def __init__(self,
                 config: Config,
+                logger: Logger,
                 name: str,
                 type: ThreadType | None = None,
                 tct: float | None = None,
                 tct_hiber: float | None = None,
                 join_margin: float | None = None,
         ) -> None:
-        self._config = config
-        self._logger = Logger("THREAD_" + name)
+        self._config: Config = config
+        self._logger: Logger = logger
         self.name = name
         
         # Initial setup.
@@ -49,7 +49,7 @@ class ThreadManager:
 
         # Timing.
         self.last_step = perf_counter()
-        self.step_timeout
+        self.step_timeout = self._config.THREAD_STEP_TIMEOUT_DEFAULT
         self._join_margin = max(0.001, join_margin or config.THREAD_JOIN_MARGIN)
         self._tct = max(0.001, tct or config.THREAD_TCT_DEFAULT)
         # Hibernate TCT: must be longer or equal to normal TCT.
@@ -57,6 +57,7 @@ class ThreadManager:
 
         # Internal.
         self._units: dict[Addr, BaseUnit] = {}
+        self._thread: threading.Thread | None = None
         self._init_units: dict[Addr, BaseUnit] = {}
         self._wakeup_event = threading.Event()
         self._stop_event = threading.Event()
@@ -102,7 +103,8 @@ class ThreadManager:
 
     def start(self, start_units: bool = False) -> None:
         """Starts all units, and starts thread."""
-        if self.stat != ThreadStat.RELOAD: self.stat = ThreadStat.STARTING
+        if self.stat != ThreadStat.RELOADING:
+            self.stat = ThreadStat.STARTING
         self._stop_event.clear()
         # Create an "agent" (Runner) and give him a copy of the list of units.
         units_to_run = list(self._units.values())
@@ -115,12 +117,13 @@ class ThreadManager:
             daemon=True
         )
         self._thread.start()
-        if self.stat != ThreadStat.RELOAD: self.stat = ThreadStat.WORKING
+        if self.stat != ThreadStat.RELOADING:
+            self.stat = ThreadStat.WORKING
 
     def reload(self, source: UnitSource, select: UnitSelection, action: ExecutionStrategy) -> bool:
         """Restarts the OS thread but restores each unit to its previous state."""
         last_stat = self.stat
-        self.stat = ThreadStat.RELOAD
+        self.stat = ThreadStat.RELOADING
         self._logger.inf(f"Reload initiated: {source.name}.{select.name}.{action.name}")
         
         # Take units from.
@@ -203,7 +206,7 @@ class ThreadManager:
         if not self._thread or not self._thread.is_alive():
             return True
         
-        if self.stat != ThreadStat.RELOAD: self.stat = ThreadStat.JOINING
+        if self.stat != ThreadStat.RELOADING: self.stat = ThreadStat.JOINING
 
         # Stop all units and cacl timeout.
         max_u_timeout = 0.0
@@ -220,7 +223,7 @@ class ThreadManager:
         self._stop_event.set()
         self.on_msg()
         self._thread.join(timeout)
-        if self.stat != ThreadStat.RELOAD: self.stat = ThreadStat.JOINED
+        if self.stat != ThreadStat.RELOADING: self.stat = ThreadStat.JOINED
         if self._thread.is_alive():
             self._logger.err(f"Thread STUCK! Some units ignored stop signal")
             return False
@@ -231,44 +234,47 @@ class ThreadManager:
         """Main execution cycle."""
         active_units = units
         self._last_fps_calc = perf_counter()
-        
-        while not self._stop_event.is_set():
-            self.last_step = start_time = perf_counter()
-            tct = self._handle_commands(active_units)
+        try:
+            while not self._stop_event.is_set():
+                self.last_step = start_time = perf_counter()
+                tct = self._handle_commands(active_units)
 
-            any_work_done = False
-            has_tickables = False
-            
-            for unit in active_units:
-                # Mutation test.
-                if self._init_type == ThreadType.ONLY_EVENT_DRIVEN:
+                any_work_done = False
+                has_tickables = False
+                
+                for unit in active_units:
+                    # Mutation test.
+                    if self._init_type == ThreadType.ONLY_EVENT_DRIVEN:
+                        if unit.type in [UnitType.TICKABLE, UnitType.SIGMA]:
+                            # A unit changed its type inside a closed club.
+                            raise UnitMutationError(
+                                f"Thread '{self.name}': Unit '{unit.addr}' mutated to "
+                                f"{unit.type.name}! This is forbidden in ONLY_EVENT_DRIVEN."
+                            )
                     if unit.type in [UnitType.TICKABLE, UnitType.SIGMA]:
-                        # A unit changed its type inside a closed club.
-                        raise UnitMutationError(
-                            f"Thread '{self.name}': Unit '{unit.addr}' mutated to "
-                            f"{unit.type.name}! This is forbidden in ONLY_EVENT_DRIVEN."
-                        )
-                if unit.type in [UnitType.TICKABLE, UnitType.SIGMA]:
-                    has_tickables = True
-                try:
-                    if unit.step(): any_work_done = True
-                except Exception as e:
-                    unit.stat = UnitStat.HALTED
-                    self._logger.err(f"Step-err in {unit.addr}: {e}")
-                    if unit in active_units: active_units.remove(unit)
-            
-            self._manage_thread_type(has_tickables)
-            if self._fps_mode: self._calc_fps()
-            
-            # TCT-managment and Event-mangment.
-            execution_time = perf_counter() - start_time
-            target_tct = tct
-            if not any_work_done and self._want_hibernate_mode:
-                target_tct = self._tct_hibernate
-            wait_time = target_tct - execution_time
-            if wait_time > 0:
-                if self._wakeup_event.wait(timeout=wait_time):
-                    self._wakeup_event.clear()
+                        has_tickables = True
+                    try:
+                        if unit.step(): any_work_done = True
+                    except Exception as e:
+                        unit.stat = UnitStat.HALTED
+                        self._logger.err(f"Step-err in {unit.addr}: {e}")
+                        if unit in active_units: active_units.remove(unit)
+                
+                self._manage_thread_type(has_tickables)
+                if self._fps_mode: self._calc_fps()
+                
+                # TCT-managment and Event-mangment.
+                execution_time = perf_counter() - start_time
+                target_tct = tct
+                if not any_work_done and self._want_hibernate_mode:
+                    target_tct = self._tct_hibernate
+                wait_time = target_tct - execution_time
+                if wait_time > 0:
+                    if self._wakeup_event.wait(timeout=wait_time):
+                        self._wakeup_event.clear()
+        except Exception as e:
+            self.stat = ThreadStat.HALTED
+            self._logger.crt(f"THREAD CRIMINAL CRASH inside _run_loop: {e}")
                     
 
     def _handle_commands(self, active_units: list[BaseUnit]) -> float:
@@ -298,7 +304,7 @@ class ThreadManager:
         units = [u for u in self._units.values() if u.stat == UnitStat.WORKING]
         n = len(units)
         if n == 0:
-            self.step_timeout = self._join_margin
+            self.step_timeout = self._config.THREAD_STEP_TIMEOUT_DEFAULT
             return
 
         # Engineering attenuation coefficient.

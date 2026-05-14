@@ -20,16 +20,17 @@ class Tier:
     """Tier manages unit lifecycle layers with active survival logic."""
     def __init__(self,
                  view: KernelTierView,
+                 logger: Logger,
                  layer_num: int,
-                 name: str | None = None, 
+                 name: str, 
                  auto: bool | None = False
             ) -> None:
         self.view: KernelTierView = view
         self.config: Config = view.cfg
         self.layer_num: int = layer_num
-        self.name: str = name or f"LAYER_{layer_num}"
+        self.name: str = name
         self.autocreated: bool = auto
-        self._logger = Logger("TIER_" + name)
+        self._logger: Logger = logger
         
         self._units: list[BaseUnit] = [] 
         self._target_units: list[BaseUnit] = []
@@ -46,6 +47,11 @@ class Tier:
             return False
         else:
             self.task = TierTask.STARTING
+            self._target_units = list(self._units)
+            now = perf_counter()
+            for unit in self._target_units:
+                self._unit_start_times[unit.addr] = now
+                self._attempts[unit.addr] = 0
             return True
         
     def stop(self) -> bool:
@@ -53,6 +59,10 @@ class Tier:
             return False
         else:
             self.task = TierTask.STOPPING
+            self._target_units = list(self._units)
+            now = perf_counter()
+            for unit in self._target_units:
+                self._unit_start_times[unit.addr] = now
             return True
 
     def step(self) -> None:
@@ -69,8 +79,11 @@ class Tier:
         """Startup escalation logic."""
         for unit in self._target_units:
             thread = self.view.get_manager(unit)
-            if thread.stat != ThreadStat.WORKING:
+            if thread.stat == ThreadStat.CREATED:
                 thread.start()
+            elif thread.stat in [ThreadStat.JOINING, ThreadStat.JOINED, ThreadStat.RELOADING]:
+                t = "Start unit into thread {name} witj stat {stat}"
+                self._logger.wrn(t, name=thread.name, stat=thread.stat.value)
             unit.start()
             if unit.stat == UnitStat.WORKING:
                 self._finish_unit_task(unit, "Started")
