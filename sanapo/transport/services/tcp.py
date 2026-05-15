@@ -50,7 +50,7 @@ class TcpConnection(threading.Thread):
     """Individual thread for each socket to prevent blocking the main service."""
     def __init__(self, name: str, sock: socket.socket, addr: tuple, 
                  broker: MessageBroker, logger: Logger, config: Config):
-        super().__init__(name=f"TCP-Conn-{name}", daemon=True)
+        super().__init__(name=f"TCP-{name}", daemon=True)
         self.remote_system_name = name
         self.sock = sock
         self.addr = addr
@@ -79,15 +79,17 @@ class TcpConnection(threading.Thread):
 
             except socket.timeout:
                 if perf_counter() - self.last_rx > self._cfg.CONN_KEEP_ALIVE:
-                    self._log.wrn(f"TCP: Connection with {self.remote_system_name} timed out.")
+                    t = "TCP: Connection with {name} timed out."
+                    self._log.wrn(t, name=self.remote_system_name)
                     self.stop()
                 continue
             except ValueError as e:
-                self._log.crt(f"TCP: Security violation from {self.addr}: {e}")
+                self._log.crt("TCP: Security violation from {addr}: {e}", addr=self.addr, e=e)
                 self.stop()
             except Exception as e:
                 if self.is_alive:
-                    self._log.err(f"TCP: Connection with {self.remote_system_name} lost: {e}")
+                    t = "TCP: Connection with {name} lost: {e}"
+                    self._log.err(t, name=self.remote_system_name, e=e)
                 self.stop()
 
     def _process_raw_frame(self, raw_data: bytes):
@@ -97,7 +99,8 @@ class TcpConnection(threading.Thread):
             data_dict = json.loads(raw_data.decode('utf-8'))
             self._broker.bus.put(data_dict)
         except Exception as e:
-            self._log.err(f"TCP: Failed to decode JSON from {self.remote_system_name}: {e}")
+            t = "TCP: Failed to decode JSON from {name}: {e}"
+            self._log.err(t, name=self.remote_system_name, e=e)
 
     def send_raw(self, data: bytes) -> bool:
         """Physical transmission over the wire."""
@@ -139,7 +142,7 @@ class TcpService(threading.Thread):
                 s.bind((self._cfg.HOST, self._cfg.TCP_PORT_DEFAULT))
                 s.listen(5)
                 address = f"{self._cfg.HOST}:{self._cfg.TCP_PORT_DEFAULT}"
-                self._log.inf(f"TCP: Server listening on {address}")
+                self._log.inf("TCP: Server listening on {address}", address=address)
                 
                 while self._is_running:
                     client_sock, addr = s.accept()
@@ -150,7 +153,7 @@ class TcpService(threading.Thread):
                         daemon=True
                     ).start()
         except Exception as e:
-            self._log.crt(f"TCP: Listener crashed: {e}")
+            self._log.crt("TCP: Listener crashed: {e}", e=e)
 
     def _inbound_handshake(self, sock: socket.socket, addr: tuple):
         """Initial contact protocol: verifies magic and system names."""
@@ -160,7 +163,7 @@ class TcpService(threading.Thread):
             # 1. Receive Magic Header (8 bytes).
             guest_magic = sock.recv(8)
             if guest_magic != self._cfg.MAGIC_HEADER:
-                self._log.wrn(f"TCP: Invalid magic from {addr}. Closing.")
+                self._log.wrn("TCP: Invalid magic from {addr}. Closing.", addr=addr)
                 sock.close()
                 return
 
@@ -175,14 +178,14 @@ class TcpService(threading.Thread):
 
             # 4. Identity collision check.
             if self._cfg.SYSTEM_NAME == remote_name:
-                self._log.err(f"TCP: System name collision: {remote_name}")
+                self._log.err("TCP: System name collision: {name}", name=remote_name)
                 sock.close()
                 return
 
             self._register_connection(remote_name, sock, addr)
             
         except Exception as e:
-            self._log.err(f"TCP: Handshake failed with {addr}: {e}")
+            self._log.err("TCP: Handshake failed with {addr}: {e}", addr=addr, e=e)
             sock.close()
 
     def _send_handshake_response(self, sock: socket.socket):
@@ -198,7 +201,8 @@ class TcpService(threading.Thread):
             if name in self._connections:
                 # Tender: keep connection from system with 'higher' name.
                 if self._cfg.SYSTEM_NAME > name:
-                    self._log.inf(f"TCP: Higher rank system (us), keeping existing conn to {name}.")
+                    t = "TCP: Higher rank system (us), keeping existing conn to {name}."
+                    self._log.inf(t, name=name)
                     sock.close()
                     return
                 else:
@@ -207,7 +211,7 @@ class TcpService(threading.Thread):
             conn = TcpConnection(name, sock, addr, self._broker, self._log, self._cfg)
             self._connections[name] = conn
             conn.start()
-            self._log.inf(f"TCP: Federation link with '{name}' established.")
+            self._log.inf("TCP: Federation link with '{name}' established.", name=name)
             
             report = {
                 "msg_type": "sys",
@@ -242,5 +246,5 @@ class TcpService(threading.Thread):
             header = struct.pack('>8sI', self._cfg.MAGIC_HEADER, len(payload))
             return conn.send_raw(header + payload)
         except Exception as e:
-            self._log.err(f"TCP: Framing error for {conn.remote_system_name}: {e}")
+            self._log.err("TCP: Framing error for {name}: {e}", e=e, name=conn.remote_system_name)
             return False

@@ -36,14 +36,14 @@ class UdpBeacon(threading.Thread):
             # Enable broadcasting
             s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             
-            self._log.inf(f"UDP: Beacon started for '{self._cfg.SYSTEM_NAME}'")
+            self._log.inf("UDP: Beacon started for '{name}'", name=self._cfg.SYSTEM_NAME)
             
             while self._is_running:
                 try:
                     # Send to the whole local network
                     s.sendto(self._packet, ('<broadcast>', self._cfg.UDP_PORT_DEFAULT))
                 except Exception as e:
-                    self._log.err(f"UDP: Beacon send error: {e}")
+                    self._log.err("UDP: Beacon send error: {e}", e=e)
                 
                 time.sleep(self._cfg.UDP_BEACON_INTERVAL)
 
@@ -73,7 +73,7 @@ class UdpListener(threading.Thread):
                     data, addr = s.recvfrom(1024)
                     self._process_beacon(data, addr)
                 except Exception as e:
-                    self._log.err(f"UDP: Listener error: {e}")
+                    self._log.err("UDP: Listener error: {e}", e=e)
 
     def _process_beacon(self, data: bytes, addr: tuple):
         """Parses incoming beacon and initiates TCP connection if new."""

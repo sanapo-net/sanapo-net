@@ -93,7 +93,7 @@ class Secretary:
             self._cmd_out[cmd_id]["deadline_done"] = add_to_deadline
             return True
         else:
-            self._logger.err(f"[Secr]: Modify deadline: cmd_id '{cmd_id}' not found")
+            self._logger.err("[Secr]: Modify deadline: cmd_id '{cmd_id}' not found", cmd_id=cmd_id)
             return False
 
     # --- Subscriptions ---
@@ -235,13 +235,14 @@ class Secretary:
                         kwargs.get('sys_type') or kwargs.get('evt_type'))
             m_name = m_type.name if m_type else "UNKNOWN"
             s_name = sub_type.name if hasattr(sub_type, 'name') else "UNKNOWN"
-            self._logger.crt(f"[Secr]: Bus Protocol Violation [{m_name}:{s_name}]: {e}")
+            t = "[Secr]: Bus Protocol Violation [{m_name}:{s_name}]: {e}"
+            self._logger.crt(t, m_name=m_name, s_name=s_name, e=e)
             return
         try:
             self._outbox.put(frame, block=False)
             res = True
         except Exception as e:
-            self._logger.crt(f"[Secr]: Outbox Error (Queue Full/Closed): {e}")
+            self._logger.crt("[Secr]: Outbox Error (Queue Full/Closed): {e}", e=e)
         return res
 
     # TODO Do i need it? dont used (was for logger)
@@ -274,7 +275,7 @@ class Secretary:
                 # Get Frame from Dict
                 frame = self._resurrect(incoming)
             except Exception as e:
-                self._logger.err(f"[Secr]: Failed to resurrect frame: {e}")
+                self._logger.err("[Secr]: Failed to resurrect frame: {e}", e=e)
                 return False
         else:
             frame = incoming
@@ -293,7 +294,8 @@ class Secretary:
         if handler:
             res = handler(frame)
         else:
-            self._logger.err("[Secr]: Received message with unknown type", frame, "MS")
+            t = "[Secr]: Received message with unknown type {frame_str}",
+            self._logger.err(t, frame, frame_str=frame.format_by_mask("mf"))
             return False
             
         self._log_task_duration(perf_counter() - start_ts, frame)
@@ -306,19 +308,21 @@ class Secretary:
         """
         callback = self._handlers_sys.get(frame.sys_type, None)
         if not callback:
-            self._logger.err(f"[Secr]: Unsupported", frame, "M")
+            t = "[Secr]: Unsupported {frame_str}"
+            self._logger.err(t, frame, frame_str=frame.format_by_mask("m"))
             return False
         if not callable(callback):
-            self._logger.crt(f"[Secr]: Not callable! Data:{callback}", frame, "M")
+            t = "[Secr]: Not callable! Data:{dt} {frame_str}"
+            self._logger.crt(t, frame, frame_str=frame.format_by_mask("m"), dt=callback)
             return False
         args = frame.payload.get("args", tuple())
-        self._logger.dbg(f"[Secr]: Call {callback.__name__} with {args}")
+        self._logger.dbg("[Secr]: Call {cb} with {args}", cb=callback.__name__, args=args)
         try:
             res = callback(*args)
-            self._logger.dbg(f"[Secr]: Call callback:{callback} returned:{res}")
+            self._logger.dbg("[Secr]: Call callback:{cb} returned:{res}", cb=callback, res=res)
             return True
         except Exception as e:
-            self._logger.err(f"[Secr]: SysCallback error: {e}")
+            self._logger.err("[Secr]: SysCallback error: {e}", e=e)
             return False
 
     def _process_event(self, frame: Frame) -> bool:
@@ -331,7 +335,8 @@ class Secretary:
             handler(frame)
             return True
         else:
-            self._logger.err(f"[Secr]: Was get evt, but module hasn't subcr", frame, "Se")
+            t = "[Secr]: Was get evt, but module hasn't subcr {frame_str}"
+            self._logger.err(t, frame, frame_str=frame.format_by_mask("mf"))
             return False
 
     def _process_command(self, frame: Frame) -> bool:
@@ -351,7 +356,8 @@ class Secretary:
         if handler and callable(handler):
             return self._execute_command(handler, frame)
         else:
-            self._logger.err("[Secr]: Command received, but no handler found", frame, "Sc")
+            t = "[Secr]: Command received, but no handler found {frame_str}"
+            self._logger.err(t, frame, frame_str=frame.format_by_mask("mf"))
             self.send_rpt(frame.sender, frame.cmd_id,
                 RptType.CANT_DO,
                 reason=RptReason.NOT_IMPLEMENTED)
@@ -365,7 +371,8 @@ class Secretary:
         res = False
         cmd_info = self._cmd_out.get(frame.cmd_id)
         if not cmd_info:
-            self._logger.err(f"Get report with unknowed cmd_id", frame, "Sri")
+            t = "Get report with unknowed cmd_id {frame_str}"
+            self._logger.err(t, frame, frame.format_by_mask("mfi"))
             return res
 
         if frame.rpt_type == RptType.INTO_WORK:
@@ -434,11 +441,12 @@ class Secretary:
 
     def _log_task_duration(self, duration: float, frame: Frame) -> None:
         """Diagnostic tool to detect module blocking."""
-        duration_ms = duration * 1000
+        dur_ms = duration * 1000
         durs = [0.001, 0.01, 0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0]
-        i = next((index for index, val in enumerate(durs) if duration_ms < val), len(durs))
+        i = next((index for index, val in enumerate(durs) if dur_ms < val), len(durs))
         speed = f"speed_{i}"
-        self._logger.dbg(f"[Secr]: Done {speed}: {duration_ms:.1f}ms", frame, "t")
+        t = "[Secr]: Done {speed}: {dur:.1f}ms {frame_str}"
+        self._logger.dbg(t, frame, speed=speed, dur=dur_ms, frame_str=frame.format_by_mask("m"))
     
     def _set_unit(self, unit: BaseUnit) -> bool:
         """
@@ -446,10 +454,10 @@ class Secretary:
         Only for Kernel.
         """
         if not isinstance(unit, BaseUnit):
-            self._logger.err(f"[Secr]: set_unit: get not BaseUnit: {unit}")
+            self._logger.err("[Secr]: set_unit: get not BaseUnit: {unit}", unit=unit)
             return False
         if self._unit is not None:
-            self._logger.err(f"[Secr]: set_unit: Detected second set! Obj: {unit}")
+            self._logger.err("[Secr]: set_unit: Detected second set! Obj: {unit}", unit=unit)
             return False
         self._unit = unit
         self.auto_subscribe()
@@ -476,7 +484,8 @@ class Secretary:
                         self._handle_frame(self._inbox.get_nowait())
                         readed += 1
                         if readed >= self._config.UNIT_BUS_READ_LIMIT:
-                            self._logger.wrn(f"[Secr]: Bus read limit reached ({readed})")
+                            t = "[Secr]: Bus read limit reached ({readed})"
+                            self._logger.wrn(t, readed=readed)
                             break
                     except Empty:
                         break

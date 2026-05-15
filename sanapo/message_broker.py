@@ -28,7 +28,7 @@ class MessageBroker:
         self.bus: queue.Queue[Frame | dict] = queue.Queue()
         
         # Routing tables
-        self._local_routes: dict[Addr, BaseAdapterTransport] = {}
+        self._local_routes: dict[str, BaseAdapterTransport] = {}
         self._federation_routes: dict[str, BaseAdapterTransport] = {}
         self._addr_book: dict[str, Addr] = {}
         
@@ -42,14 +42,14 @@ class MessageBroker:
 
     def register_local_route(self, transport: BaseAdapterTransport):
         """Registers a local route using the address already stored in the transport."""
-        addr_obj = transport.sanapo_addr
-        self._local_routes[addr_obj] = transport
-        self._log.inf(f"Broker: Local route registered for {addr_obj}")
+        addr_str = transport.sanapo_addr.unit
+        self._local_routes[addr_str] = transport
+        self._log.inf("Broker: Local route registered for {addr}", addr=addr_str)
 
     def register_federation_route(self, system_name: str, transport: BaseAdapterTransport):
         """Registers a link to another sanapo instance."""
         self._federation_routes[system_name] = transport
-        self._log.inf(f"Federation link to '{system_name}' active")
+        self._log.inf("Federation link to '{name}' active", name=system_name)
 
     def step(self) -> bool:
         """Process a slice of messages from the global bus."""
@@ -64,7 +64,7 @@ class MessageBroker:
             except queue.Empty:
                 break
             except Exception as e:
-                self._log.crt(f"Broker: Routing failure: {e}")
+                self._log.crt("Broker: Routing failure: {e}", e=e)
                 break
         return processed > 0
 
@@ -94,7 +94,7 @@ class MessageBroker:
         """Handles physical delivery logic (Local vs Federation)."""
         # Case A: Internal delivery (Queue)
         if target_addr.is_local(self._cfg.SYSTEM_NAME):
-            transport = self._local_routes.get(target_addr)
+            transport = self._local_routes.get(target_addr.unit)
             if transport:
                 return transport.send(frame)
         

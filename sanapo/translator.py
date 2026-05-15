@@ -23,7 +23,7 @@ class Translator:
         file_path = os.path.join(self._lang_dir, f"{lang_code}.json")
         
         if not os.path.exists(file_path):
-            self._logger.wrn(f"Language file {file_path} not found.")
+            self._logger.wrn("Language file {path} not found", path=file_path)
             return False
 
         try:
@@ -32,7 +32,7 @@ class Translator:
                 self._current_lang = lang_code
                 return True
         except (json.JSONDecodeError, IOError) as e:
-            self._logger.err(f"Failed to load {lang_code}. Error: {e}")
+            self._logger.err("Failed to load {lang_code}. Error: {e}", lang_code=lang_code, e=e)
             return False
 
     def translate(self, text: str, **kwargs) -> str:
@@ -51,10 +51,10 @@ class Translator:
             return template.format(**kwargs)
         except KeyError as e:
             # If a variable is missing in kwargs, return template with raw keys.
-            self._logger.err(f"Missing variable {e} for text: {text}")
+            self._logger.err("Missing variable {e} for text: {text}", e=e, text=text)
             return template
         except Exception as e:
-            self._logger.err(f"Formatting error: {e}")
+            self._logger.err("Formatting error: {e}", e=e)
             return template
 
     @property

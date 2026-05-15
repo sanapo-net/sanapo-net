@@ -11,7 +11,6 @@ if TYPE_CHECKING:
     from sanapo.config import Config
     from sanapo.logger import Logger
     from sanapo.base_unit import BaseUnit
-    from sanapo.thread_manager import ThreadManager
     
 class Tier:
 
@@ -77,7 +76,7 @@ class Tier:
 
     def _process_starting(self, now: float):
         """Startup escalation logic."""
-        for unit in self._target_units:
+        for unit in list(self._target_units):
             thread = self.view.get_manager(unit)
             if thread.stat == ThreadStat.CREATED:
                 thread.start()
@@ -108,7 +107,7 @@ class Tier:
 
     def _esc_reborn(self, unit: BaseUnit, now: float):
         """Attempt 1: Module restart."""
-        self._logger.wrn(f"{unit.addr}: Slow start. Action: REBORN.")
+        self._logger.wrn("{addr}: Slow start. Action: REBORN", addr=unit.addr)
         unit.restart_module(force=True)
         self._attempts[unit.addr] = 1
         self._unit_start_times[unit.addr] = now
@@ -117,7 +116,7 @@ class Tier:
 
     def _esc_rebuild(self, unit: BaseUnit, now: float):
         """Attempt 2: Kernel rebuilds unit."""
-        self._logger.err(f"{unit.addr}: Reborn failed. Action: REBUILD.")
+        self._logger.err("{addr}: Reborn failed. Action: REBUILD", addr=unit.addr)
         self.view.rebuild_unit(unit) 
         self._attempts[unit.addr] = 2
         self._unit_start_times[unit.addr] = now
@@ -137,17 +136,17 @@ class Tier:
                 break
 
         if is_safe:
-            self._logger.crt(f"Thread {thread.name} STUCK. Action: REPLAY.")
+            self._logger.crt("Thread {name} STUCK. Action: REPLAY", name=thread.name)
             thread.reload(UnitSource.CURRENT, UnitSelection.ALL, ExecutionStrategy.WORKING)
             self._attempts[unit.addr] = 3
             self._unit_start_times[unit.addr] = now
         else:
-            self._logger.err(f"Thread {thread.name} busy with others. Action: SKIP UNIT.")
+            self._logger.err("Thread {name} busy with others. Action: SKIP UNIT", name=thread.name)
             self._esc_fail(unit)
 
     def _esc_fail(self, unit: float):
         """Final unit drop."""
-        self._logger.crt(f"Unit {unit.addr}: DEAD after all attempts.")
+        self._logger.crt("Unit {addr}: DEAD after all attempts", addr=unit.addr)
         if unit in self._target_units:
             self._target_units.remove(unit)
 
@@ -178,13 +177,17 @@ class Tier:
 
             # If shutdown takes too long.
             if elapsed > timeout:
-                self._logger.wrn(f"Unit {unit.addr} stop timeout! Marking as HALTED.")
+                t = "Unit {addr} stop timeout! Marking as HALTED."
+                self._logger.wrn(t, addr=unit.addr)
                 unit.stat = UnitStat.HALTED
+
+                if unit in self._target_units:
+                    self._target_units.remove(unit)
                 
                 # Optional: try to kill the thread if it's the only unit there.
                 if thread and len(thread._units) == 1:
-                    t = f"Forcing thread {thread.name} RELOAD due to stuck unit {unit.addr}"
-                    self._logger.crt(t)
+                    t = "Forcing thread {name} RELOAD due to stuck unit {addr}"
+                    self._logger.crt(t, name=thread.name, addr=unit.addr)
                     thread.reload(UnitSource.CURRENT,  UnitSelection.ALL, ExecutionStrategy.ALL)
 
         self._check_completion(is_start=False)

@@ -42,8 +42,7 @@ class Logger:
     def set_translator(self, translator: Translator) -> None:
         self._translator = translator
 
-    def _output(self, level: Logs, text: str, frame: Frame | None = None, mask: str = "",
-                **kwargs) -> None:
+    def _output(self, level: Logs, text: str, frame: Frame | None = None, **kwargs) -> None:
         
         if self._translator:
             translated_text = self._translator.translate(text, **kwargs)
@@ -67,8 +66,7 @@ class Logger:
             trc_str = f" ({filename}:{lineno})"
 
         time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        msk_str = self._read_mapping(frame, mask)
-        log_str = f"{time_str} {level.value} {self._addr}: {translated_text}{trc_str}{msk_str}."
+        log_str = f"{time_str} {level.value} {self._addr}: {translated_text}{trc_str}."
 
         # Console.
         if level in self._cfg.DEFAULT_LOG_FLAGS["console"]:
@@ -90,45 +88,17 @@ class Logger:
             with open(path_file_jsonl, "a", encoding="utf-8") as f:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
     
-    def _read_mapping(self, frame: Frame, mask: str = "") -> list:
-        """ Read mask and return formated msg """
-        if not frame and mask:
-            self._output(Logs.ERR, "Called loggings with mask, buh without frame")
-            return "[err_get_text_by_mask]"
-        if frame and mask:
-            details = ""
-            msg_type = ""
-            if "M" in mask:
-                sub_type = (frame.evt_type or frame.sys_type or frame.cmd_type or frame.rpt_type).value
-                sub_type_str = sub_type if sub_type else "unknown"
-                msg_type = f"{frame.msg_type}.{sub_type_str}"
-            mapping = {
-                "M": msg_type,
-                "S": f"From:{frame.sender.name}",
-                "R": f"Recipient:{frame.recipient}",
-                "P": f"Payload: {frame.payload.get('text', 'N/A')}",
-                "D": f"Deadline:{frame.deadline}",
-                "T": f"Exit time:{frame.time_ext_req}",
-                "i": f"ID:{frame.cmd_id}",
-                "w": f"Reason:{frame.reason}",
-            }
-            for char in mask:
-                details += "|" + mapping[char]
-            return details
-        else:
-            return ""
+    def err(self, text: str, frame: Frame | None = None, **kwargs) -> None:
+        self._output(Logs.ERR, text, frame, **kwargs)
 
-    def err(self, text: str, frame: Frame | None = None, mask: str = "", **kwargs) -> None:
-        self._output(Logs.ERR, text, frame, mask, **kwargs)
+    def crt(self, text: str, frame: Frame | None = None, **kwargs) -> None:
+        self._output(Logs.CRT, text, frame, **kwargs)
 
-    def crt(self, text: str, frame: Frame | None = None, mask: str = "", **kwargs) -> None:
-        self._output(Logs.CRT, text, frame, mask, **kwargs)
+    def wrn(self, text: str, frame: Frame | None = None, **kwargs) -> None:
+        self._output(Logs.WRN, text, frame, **kwargs)
 
-    def wrn(self, text: str, frame: Frame | None = None, mask: str = "", **kwargs) -> None:
-        self._output(Logs.WRN, text, frame, mask, **kwargs)
+    def inf(self, text: str, frame: Frame | None = None, **kwargs) -> None:
+        self._output(Logs.INF, text, frame, **kwargs)
 
-    def inf(self, text: str, frame: Frame | None = None, mask: str = "", **kwargs) -> None:
-        self._output(Logs.INF, text, frame, mask, **kwargs)
-
-    def dbg(self, text: str, frame: Frame | None = None, mask: str = "", **kwargs) -> None:
-        self._output(Logs.DBG, text, frame, mask, **kwargs)
+    def dbg(self, text: str, frame: Frame | None = None, **kwargs) -> None:
+        self._output(Logs.DBG, text, frame, **kwargs)

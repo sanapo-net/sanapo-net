@@ -23,11 +23,11 @@ class BaseUnit():
             logger: Logger,
             secr: Secretary | None = None
         ) -> None:
-        self.config: Config = config
+        self._config: Config = config
+        self._logger: Logger = logger
+        self._secr: Secretary = secr
         self.addr: Addr = addr
         self.type: UnitType = type
-        self.logger: Logger = logger
-        self.secr: Secretary = secr
         self.manifest: Manifest = None # Kernel make it
 
         self._module: BaseModule | None = None
@@ -77,7 +77,7 @@ class BaseUnit():
             view = UnitModuleView(self)
         except Exception as e:
             self.stat = UnitStat.HALTED
-            self.logger.err(f"Failed to create UnitModuleView instance: {e}")
+            self._logger.err("Failed to create UnitModuleView instance: {e}", e=e)
             return False
         try:
             # The module accesses everything through a single unit object.
@@ -86,12 +86,13 @@ class BaseUnit():
             return True
         except Exception as e:
             self.stat = UnitStat.HALTED
-            self.logger.err(f"Failed to create module instance: {e}")
+            self._logger.err("Failed to create module instance: {e}", e=e)
             return False
 
     def restart_module(self, force: bool = False) -> bool:
         """Full restart of the module logic within the existing unit."""
-        self.logger.inf(f"Rebirth of module in {self.addr} initiated (force={force})")
+        t = "Rebirth of module in {addr} initiated (force={force})"
+        self._logger.inf(t, addr=self.addr, force=force)
 
         # Shutting down the old module.
         if self._module:
@@ -106,7 +107,7 @@ class BaseUnit():
                     self.stat = UnitStat.REBIRTHING 
                     return True
             except Exception as e:
-                self.logger.err(f"Error during module rebirthing: {e}")
+                self._logger.err("Error during module rebirthing: {e}", e=e)
                 return False
 
         # Create and start new module.
@@ -130,7 +131,7 @@ class BaseUnit():
             if self._deadline and now >= self._deadline:
                 self.stat = UnitStat.WORKING
                 self._deadline = None
-                self.logger.inf(f"Forced to STARTED by timeout")
+                self._logger.inf("Forced to STARTED by timeout")
                 return False
 
         if self.stat == UnitStat.STOPPING:
@@ -140,7 +141,7 @@ class BaseUnit():
             if self._deadline and now >= self._deadline:
                 self.stat = UnitStat.STOPPED
                 self._deadline = None
-                self.logger.inf(f"Forced to STOPPED by timeout")
+                self._logger.inf("Forced to STOPPED by timeout")
                 return False
         
         if self.stat == UnitStat.STOPPED:
@@ -154,7 +155,7 @@ class BaseUnit():
         rules = self._step_map.get(self.stat, {}).get(self.type)
         was_work = False
         if rules:
-            if rules[0] and self.secr: self.secr._step()
+            if rules[0] and self._secr: self._secr._step()
             if rules[1] and self._module:
                 self._module.step()
                 was_work = True
@@ -195,24 +196,52 @@ class BaseUnit():
             self._step_map = None
             self._module = None
             self.manifest = None
-            self.logger = None 
-            self.secr = None
+            self._logger = None 
+            self._secr = None
             self.addr = None
             return True
         else:
             return False
     
     def mutate(self, new_type: UnitType) -> bool:
+        """Changes unit type on the fly"""
         if not isinstance(new_type, UnitType):
-            self.logger.err(f"Change UnitType, expected UnitType, got {type(new_type)}")
+            t = "Change UnitType, expected UnitType, got {type}"
+            self._logger.err(t, type=type(new_type))
             return False
         if isinstance(self._module, BaseModule):
             self.type = new_type
             return True
         elif hasattr(self._module, "step") and callable(self._module):
             self.type = new_type
-            self.logger.dbg(f"Change UnitType to {new_type}, and modile is not BaseModule type")
+            t = "Change UnitType to {new_type}, and modile is not BaseModule type"
+            self._logger.dbg(t, new_type=new_type)
             return True
+        
+    def _validate_and_set_timeouts(self, start_val: float | None = None, stop_val: float | None = None) -> None:
+        """Atomic timeout validator with race-condition prevention."""
+        # Calculate safety margin
+        min_allowed = max(self.step_timeout, self._config.THREAD_TCT_DEFAULT) * 1.5
+        
+        # --- Validate START_TIMEOUT ---
+        target_start = start_val if start_val is not None else self.start_timeout
+        if target_start < min_allowed:
+            if start_val is not None:
+                t = "Timeout protection: requested start_timeout {old}s is too low. Raised to {min_allowed}s."
+                self._logger.wrn(t, old=start_val, min_allowed=min_allowed)
+            target_start = min_allowed
+            
+        # --- Validate STOP_TIMEOUT ---
+        target_stop = stop_val if stop_val is not None else self.stop_timeout
+        if target_stop < min_allowed:
+            if stop_val is not None:
+                t = "Timeout protection: stop_timeout raised from {old}s to {min_allowed}s"
+                self._logger.wrn(t, old=start_val, min_allowed=min_allowed)
+            target_stop = min_allowed
+
+        self.start_timeout = target_start
+        self.stop_timeout = target_stop
+
 
 class UnitModuleView:
     """Safe API for a Module to interact with its Unit container."""
@@ -220,9 +249,9 @@ class UnitModuleView:
         self._unit: BaseUnit = unit
 
         # --- Shortened Tools ---
-        self.cfg: Config = unit.config
-        self.log: Logger = unit.logger
-        self.scr: Secretary = unit.secr
+        self.cfg: Config = unit._config
+        self.log: Logger = unit._logger
+        self.scr: Secretary = unit._secr
         self.addr: Addr = unit.addr
 
         # --- Status Control Signals ---
@@ -233,17 +262,17 @@ class UnitModuleView:
     # --- Read-only Properties ---
     @property
     def stat(self) -> UnitStat:
-        """Current status of the unit. / Текущий статус юнита."""
+        """Current status of the unit."""
         return self._unit.stat
 
     @property
     def type(self) -> UnitType:
-        """Execution type of the unit. / Тип исполнения юнита."""
+        """Execution type of the unit."""
         return self._unit.type
 
     @property
     def manifest(self) -> Manifest:
-        """Unit passport data. / Паспортные данные юнита."""
+        """Unit passport data."""
         return self._unit.manifest
 
     # --- Timeouts ---
@@ -253,8 +282,8 @@ class UnitModuleView:
 
     @start_timeout.setter
     def start_timeout(self, value: float) -> None:
-        """Allows module to adjust deadline before a heavy operation."""
-        self._unit.start_timeout = value
+        """Safely injects validated start timeout into the container."""
+        self._unit._validate_and_set_timeouts(start_val=value)
 
     @property
     def stop_timeout(self) -> float:
@@ -262,8 +291,8 @@ class UnitModuleView:
 
     @stop_timeout.setter
     def stop_timeout(self, value: float) -> None:
-        """Allows module to adjust stop deadline dynamically."""
-        self._unit.stop_timeout = value
+        """Safely injects validated stop timeout into the container."""
+        self._unit._validate_and_set_timeouts(stop_val=value)
 
     @property
     def step_timeout(self) -> float:

@@ -61,6 +61,30 @@ class Frame:
                 if self.reason is None:
                     raise MessageInitError(f"Field 'reason' is mandatory for RptType.CANT_DO")
     
+    def format_by_mask(self, mask: str = "") -> str:
+        """Reads characters from the mask string and returns a formatted details string."""
+        if not mask:
+            return ""
+        sub_type_obj = self.evt_type or self.sys_type or self.cmd_type or self.rpt_type
+        sub_type_str = sub_type_obj.value if sub_type_obj else "unknown"
+        msg_type_str = f"{self.msg_type.value}.{sub_type_str}"
+
+        mapping = {
+            "m": msg_type_str,
+            "f": f"From:{self.sender.unit if self.sender else 'N/A'}",
+            "t": f"To:{self.recipient.unit if self.recipient else 'N/A'}",
+            "p": f"Payload:{self.payload.get('text', 'N/A') if isinstance(self.payload, dict) else 'RAW'}",
+            "d": f"Deadline:{self.deadline}",
+            "e": f"Extension:{self.time_ext_req}",
+            "i": f"ID:{self.cmd_id}",
+            "r": f"Reason:{self.reason.value if self.reason else 'N/A'}",
+        }
+        details = ""
+        for char in mask:
+            if char in mapping:
+                details += "|" + mapping[char]
+        return details
+
     def to_dict(self, deep: bool = False) -> dict:
         """
         Serializes the frame into a dictionary. 

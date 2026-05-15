@@ -153,7 +153,7 @@ class Kernel:
             if not tier and layer_num:
                 tier = self._tiers.get(layer_num)
             if tier:
-                self._log.inf(f"Tier '{name}' (num={tier.layer_num}) reused.")
+                self._log.inf("Tier '{name}' (num={n}) reused.", name=name, n=tier.layer_num)
                 if name and layer_num and (name != tier.name or layer_num != tier.layer_num):
                     t = "Detected add_tier with wrong pair name+num! name={name} num={num})"
                     self._log.crt(t, name=name, num=layer_num)
@@ -262,14 +262,21 @@ class Kernel:
 
     def add_units(self, configs: list[dict[str, any]]) -> dict[str, BaseUnit]:
         res = {}
+        need_dump = False
+
         for cfg in configs:
             unit = self.add_unit(**cfg)
+            if not unit: continue
+
             # Routing
             transport = QueueAdapterTransport(unit.addr, unit.secr._inbox)
-            self._broker.register_local_route(str(unit.addr.unit), transport)
+            self._broker.register_local_route(transport)
             res[unit.addr.unit] = unit
 
-        if unit.manifest.is_persistent:
+        if unit.manifest and unit.manifest.is_persistent:
+            need_dump = True
+        
+        if need_dump:
             self._sys_consist_changed()
         return res
 
@@ -470,7 +477,7 @@ class Kernel:
 
     def start(self) -> None:
         """Starts all managers and initiates tier ignition"""
-        self._log.inf(f"Ignition sequence started")
+        self._log.inf("Ignition sequence started")
         self._is_running = True
         self._boot_master.ignite()
 
@@ -541,7 +548,7 @@ class Kernel:
             self._log.dbg("Consistency dump updated and rotated")
             
         except Exception as e:
-            self._log.crt(f"Atomic save failed: {e}")
+            self._log.crt("Atomic save failed: {e}", e=e)
 
     def _sys_consist_load(self) -> bool:
         """Loads system state from the last stable dump or backup."""
@@ -560,7 +567,7 @@ class Kernel:
             with open(target, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
-            self._log.inf(f"Restoring system from {target}...")
+            self._log.inf("Restoring system from {target}...", target=target)
 
             # Restore infra
             if "threads" in data: self.add_threads(list(data["threads"].values()))
@@ -576,17 +583,42 @@ class Kernel:
             if unit_recipes:
                 self.setup(units=unit_recipes)
 
-            self._log.inf(f"System state restored from {target}")
+            self._log.inf("System state restored from {target}", target=target)
             return True
 
         except Exception as e:
-            self._log.crt(f"Failed to load dump {target}: {e}")
+            self._log.crt("Failed to load dump {target}: {e}", target=target, e=e)
             # If main failed, try to call load again to pick up backup
             if target == main_file and os.path.exists(bak_file):
                 self._log.err("Main dump corrupted, trying backup...")
                 os.remove(main_file) # Remove corrupted file
                 return self._sys_consist_load()
             return False
+
+    def _resurrect_class(self, class_str: str) -> any:
+        """Dynamically loads a Python module and extracts the specified class by string path."""
+        import importlib
+        
+        if ":" not in class_str:
+            t = "Resurrect: Invalid class string format format '{s}'. Expected 'module:ClassName'"
+            self._log.crt(t, s=class_str)
+            raise ValueError(f"Class string must contain ':' separator: {class_str}")
+        try:
+            module_path, class_name = class_str.split(":")
+            module = importlib.import_module(module_path)
+            target_class = getattr(module, class_name)
+            t = "Resurrect: Class {c} successfully loaded from {m}"
+            self._log.dbg(t, c=class_name, m=module_path)
+            return target_class
+        except ImportError as e:
+            t = "Resurrect: Cannot find or import module '{p}'. Error: {e}"
+            self._log.crt(t, p=module_path, e=e)
+            raise e
+        except AttributeError as e:
+            t = "Resurrect: Module '{p}' loaded, but Class '{c}' was not found inside! Error: {e}"
+            self._log.crt(t, p=module_path, c=class_name, e=e)
+            raise e
+
 
     # --- Callbacks ---
 
@@ -600,7 +632,7 @@ class Kernel:
             try:
                 cb()
             except Exception as e:
-                self._log.err(f"User startup callback failed: {e}")
+                self._log.err("User startup callback failed: {e}", e=e)
 
     # Callback for BootMaster
     def on_stopped(self) -> None:
@@ -617,7 +649,7 @@ class Kernel:
                 try:
                     cb()
                 except Exception as e:
-                    self._log.err(f"User shutdown callback failed: {e}")
+                    self._log.err("User shutdown callback failed: {e}", e=e)
             self._is_running = False
 
     # Callback for Tier
@@ -640,7 +672,8 @@ class Kernel:
     
     # Callback for KernelSecretary TODO
     def handle_new_federation(self, remote_sys: str):
-        self._log.inf(f"Federation: System {remote_sys} connected. Ready for unit exchange.")
+        t = "Federation: System {sys} connected. Ready for unit exchange."
+        self._log.inf(t, sys=remote_sys)
     
     # Callback for KernelSecretary TODO
     def register_remote_unit(manifest_data):
@@ -652,9 +685,11 @@ class Kernel:
     
     # Callback for WatchDog TODO
     def on_thread_stuck(self, manager: ThreadManager, delay: float):
-        self._log.crt(f"WatchDog: Thread {manager.name} STUCK for {delay:.2f}s!")
+        t = "WatchDog: Thread {name} STUCK for {delay:.2f}s!"
+        self._log.crt(t.format(name=manager.name, delay=delay))
     
     # Callback for WatchDog TODO
     def on_unit_stuck(self, unit: BaseUnit, u_delay: float, manager: ThreadManager):
-        self._log.wrn(f"WatchDog: Unit {unit.addr} STUCK for {u_delay:.2f}s in {manager.name}")
+        t = "WatchDog: Unit {addr} STUCK for {delay:.2f}s in {name}"
+        self._log.wrn(t, addr=unit.addr, delay=u_delay, name=manager.name)
 
