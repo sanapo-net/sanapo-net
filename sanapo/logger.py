@@ -1,14 +1,13 @@
 # core/logger.py
 from __future__ import annotations
+import os
 import json
 import inspect
 import logging
 import threading
-from enum import Enum
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from typing import TYPE_CHECKING
-
 
 from sanapo.addr import Addr
 from sanapo.protocol import Frame
@@ -38,6 +37,9 @@ class Logger:
         self.file_handler = RotatingFileHandler(
             "sanapo.log", maxBytes=5*1024*1024, backupCount=5, encoding='utf-8'
         )
+        import os
+        if config.PATH_LOGS and not os.path.exists(config.PATH_LOGS):
+            os.makedirs(config.PATH_LOGS, exist_ok=True)
         
     def set_translator(self, translator: Translator) -> None:
         self._translator = translator
@@ -58,12 +60,17 @@ class Logger:
             "end": "\033[0m"           # default
         }
 
+        # Traceback for err crt
         trc_str = ""
         if level in [Logs.CRT, Logs.ERR]:
+            import sys
+            import traceback
             caller = inspect.stack()[3]
-            filename = caller.filename.split('/')[-1]
+            filename = caller.filename.replace('\\', '/').split('/')[-1] # for os windows
             lineno = caller.lineno
             trc_str = f" ({filename}:{lineno})"
+            if sys.exc_info()[0] is not None:
+                trc_str += f"\n\033[91m{traceback.format_exc()}\033[0m"
 
         time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
         log_str = f"{time_str} {level.value} {self._addr}: {translated_text}{trc_str}."

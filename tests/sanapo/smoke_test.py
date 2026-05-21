@@ -1,12 +1,20 @@
+# tests/sanapo/smoke_test.py
+from __future__ import annotations
 import sys
 import os
 import time
 import traceback
-from time import perf_counter
-
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from typing import TYPE_CHECKING
 
 from sanapo.base_module import BaseModule
+from core.drafts.project_enums import EvtType, CmdType
+from sanapo.enums import RptType, RptReason, SysType
+
+if TYPE_CHECKING:
+    from sanapo.base_unit import UnitModuleView
+    from sanapo.protocol import Frame
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 
 # Prints
@@ -22,18 +30,42 @@ def assert_failure(test_name: str, error: Exception | str) -> None:
 
 # Test unit
 class DummyWorker(BaseModule):
-    """Test unit for tier start check"""
+    """Smoke test unit for messaging verification via UnitModuleView"""
+    def __init__(self, view, **kwargs):
+        super().__init__(view, **kwargs)
+        self.v: UnitModuleView = view
+        self.counter: int = 0
+        
     def start(self):
-        time.sleep(0.1)
-        self._u.start_timeout = 0.35
-        self._u.log.inf("DummyWorker: I am awake and working!")
-        self._u.started()
+        self.v.log.dbg("module start")
+        if self.v.addr.unit == "UNIT_RECEIVER":
+            self.v.scr.subscribe(cb=self._on_cmd, cmd=CmdType.CMD_TEST)
+        self.v.started()
 
     def step(self) -> bool:
-        return True
+        if self.v.addr.unit == "UNIT_COMMANDER":
+            self.counter += 1
+            if self.counter % 100 == 0:
+                print(f"cmd UNIT_COMMANDER -> UNIT_RECEIVER")
+                recipient = self.v.addr_by_str("UNIT_RECEIVER")
+                if recipient:
+                    p = {"text":f"CMD: Hello to RECEIVER from {self.v.addr.unit}!"}
+                    self.v.scr.send_cmd(recipient, CmdType.CMD_TEST, self._on_rpt, payload=p)
+
+    def _on_cmd(self, frame: Frame) -> bool:
+        self.v.log.dbg("module _on_cmd")
+        self.v.log.dbg(f"was got cmd with p[text]:{frame.payload['text']}")
+        time.sleep(0.01)
+        p = {"text":f"CMD: Hello to COMMANDER from {self.v.addr.unit}!"}
+        self.v.scr.send_rpt(frame.sender,frame.cmd_id, RptType.DONE, p)
+
+    def _on_rpt(self, frame) -> bool:
+        self.v.log.dbg("module _on_rpt")
+        self.v.log.dbg(f"was got rpt with p[text]:{frame.payload['text']}")
 
     def stop(self):
-        self._u.log.inf("DummyWorker: Going to sleep...")
+        self.v.log.dbg("module stop")
+
 
 
 # STEP 1: PROJECT ENUMS IMPORT
@@ -80,29 +112,28 @@ t_name = "Infrastructure Provisioning (Tiers, Threads, Units)"
 try:
     print("\n--- Building Infrastructure ---")
     kernel._cfg.BOOT_UI_MODE = "CUI"  
-    kernel._cfg.KERNEL_TCT = 0.01     
-    kernel._cfg.SYSTEM_NAME = "LOCAL"
+    kernel._cfg.KERNEL_TCT = 0.01
 
-    api.add_tier(layer_num=1, name="tier_1")
-    api.add_tier(layer_num=2, name="tier_2")
+    api.add_tier(layer_num=1, name="TIER_for_RECEIVER")
+    api.add_tier(layer_num=2, name="TIER_for_COMMANDER")
     api.add_thread(name="MAIN_POOL", type=ThreadType.TICKABLE, tct=0.02)
 
     api.add_unit(
-        name="UNIT_1",
+        name="UNIT_RECEIVER",
         type=UnitType.TICKABLE,
         m_class=DummyWorker,
         thread_name="MAIN_POOL",
         tier_layer=1,
-        tier_name="tier_1"
+        tier_name="TIER_for_RECEIVER"
     )
 
     api.add_unit(
-        name="UNIT_2",
+        name="UNIT_COMMANDER",
         type=UnitType.TICKABLE,
         m_class=DummyWorker,
         thread_name="MAIN_POOL",
         tier_layer=2,
-        tier_name="tier_2"
+        tier_name="TIER_for_COMMANDER"
     )
     assert_success(t_name)
 except Exception as e:
@@ -117,8 +148,8 @@ print("\n--- Igniting System ---")
 t_name = "System Lifecycle: Boot sequence execution"
 try:
     api.start()
-    start_run = perf_counter()
-    while perf_counter() - start_run < 3.0:
+    start_run = time.perf_counter()
+    while time.perf_counter() - start_run < 3.0:
         kernel.loop() 
     assert_success(t_name)
 except KeyboardInterrupt:
@@ -135,10 +166,11 @@ print("\n--- Stopping System ---")
 t_name = "System Lifecycle: Shutdown sequence execution"
 try:
     api.stop()
-    start_stop = perf_counter()
-    while perf_counter() - start_stop < 2.0:
+    start_stop = time.perf_counter()
+    while time.perf_counter() - start_stop < 2.0:
         kernel.loop()
     assert_success(t_name)
+
 except Exception as e:
     print("\n\033[91m--- DETAILED CRASH LOG ---")
     traceback.print_exc()

@@ -60,7 +60,7 @@ class BootMaster:
         tier_num = self._plan[self.current_tier_idx]
         current_tier = self.view.tiers.get(tier_num)
         if not current_tier:
-            self.view.log.err("Got None as current_tier! tier_num={num}", num=tier_num)
+            self.view.log.err("BOOT: Got None as current_tier! tier_num={num}", num=tier_num)
         
         # Send info to progress-bars
         self._render_ui(current_tier, len(self._plan))
@@ -69,9 +69,9 @@ class BootMaster:
         if current_tier.task == TierTask.NONE:
             if current_tier.last_result_ok:
                 if self.mode == MasterMode.BOOTING:
-                    self.view.log.inf("Boot: Tier {name} UP successful", name=current_tier.name)
+                    self.view.log.inf("BOOT: Tier {name} UP successful", name=current_tier.name)
                 if self.mode == MasterMode.SHUTDOWN:
-                    self.view.log.inf("Shutdown: Tier {name} DOWN successful",name=current_tier.name)
+                    self.view.log.inf("BOOT: Shutdown: Tier {name} DOWN successful",name=current_tier.name)
                 self._next_step()
             else:
                 self._handle_failure(current_tier)
@@ -93,13 +93,30 @@ class BootMaster:
             else:
                 tier.stop()
 
+    def _process_current_tier(self) -> None:
+        """
+        Commands the current tier to start its internal logic
+        using the pre-calculated plan.
+        """
+        if 0 <= self.current_tier_idx < len(self._plan):
+            tier_num = self._plan[self.current_tier_idx]
+            tier = self.view.tiers.get(tier_num)
+            if tier:
+                action = "igniting" if self.mode == MasterMode.BOOTING else "shuting down"
+                t = "BOOT: Cascade {act} Tier {name} (Layer {num})"
+                self.view.log.dbg(t, act=action, name=tier.name, num=tier_num)
+                if self.mode == MasterMode.BOOTING:
+                    tier.start()
+                else:
+                    tier.stop()
+
     # TODO
     def _handle_failure(self, tier: Tier) -> None:
         """Processes failures for both Boot and Shutdown modes with UI feedback."""
         
         # SHUTDOWN
         if self.mode == MasterMode.SHUTDOWN:
-            t = "Shutdown: Tier {name} STUCK"
+            t = "BOOT: Shutdown: Tier {name} STUCK"
             self.view.log.wrn(t, name=tier.name)
             
             if self._ui:
@@ -113,7 +130,7 @@ class BootMaster:
         # BOOT
         # Attempt for everyone Tier
         if self.tier_attempt < 2:
-            t = "Boot: Tier {name} FAIL. Retry {att}/2"
+            t = "BOOT: Tier {name} FAIL. Retry {att}/2"
             self.view.log.wrn(t, name=tier.name, att=self.tier_attempt + 1)
             if self._ui:
                 msg = self.view.translate(t, name=tier.name, att=self.tier_attempt + 1)
@@ -123,7 +140,7 @@ class BootMaster:
 
         # Attempt for entire application (if the Tier does not start after two attempts)
         elif self.global_attempt < 2:
-            t = "Boot: Tier {name} FATAL. RESTARTING..."
+            t = "BOOT: Tier {name} FATAL. RESTARTING..."
             self.view.log.crt(t, name=tier.name)
             if self._ui:
                 msg = self.view.translate(t, name=tier.name)
@@ -131,7 +148,7 @@ class BootMaster:
             self.global_attempt += 1
             self.view.restart()
         else:
-            t = "Boot: Skipping dead Tier {name}"
+            t = "BOOT: Skipping dead Tier {name}"
             self.view.log.err(t, name=tier.name)
             if self._ui:
                 msg = self.view.translate(t, name=tier.name)

@@ -93,7 +93,7 @@ class Secretary:
             self._cmd_out[cmd_id]["deadline_done"] = add_to_deadline
             return True
         else:
-            self._logger.err("[Secr]: Modify deadline: cmd_id '{cmd_id}' not found", cmd_id=cmd_id)
+            self._logger.err("SECR: Modify deadline: cmd_id '{cmd_id}' not found", cmd_id=cmd_id)
             return False
 
     # --- Subscriptions ---
@@ -218,6 +218,7 @@ class Secretary:
         """
         return self._safe_send(
             msg_type=MsgType.SYS,
+            recipient=self._config.ADDR_KERNEL,
             sys_type=sys_type,
             payload=payload
         )
@@ -235,14 +236,14 @@ class Secretary:
                         kwargs.get('sys_type') or kwargs.get('evt_type'))
             m_name = m_type.name if m_type else "UNKNOWN"
             s_name = sub_type.name if hasattr(sub_type, 'name') else "UNKNOWN"
-            t = "[Secr]: Bus Protocol Violation [{m_name}:{s_name}]: {e}"
+            t = "SECR: Bus Protocol Violation [{m_name}:{s_name}]: {e}"
             self._logger.crt(t, m_name=m_name, s_name=s_name, e=e)
             return
         try:
             self._outbox.put(frame, block=False)
             res = True
         except Exception as e:
-            self._logger.crt("[Secr]: Outbox Error (Queue Full/Closed): {e}", e=e)
+            self._logger.crt("SECR: Outbox Error (Queue Full/Closed): {e}", e=e)
         return res
 
     # TODO Do i need it? dont used (was for logger)
@@ -294,8 +295,8 @@ class Secretary:
         if handler:
             res = handler(frame)
         else:
-            t = "[Secr]: Received message with unknown type {frame_str}",
-            self._logger.err(t, frame, frame_str=frame.format_by_mask("mf"))
+            t = "SECR: Received message with unknown type: {frame_str}",
+            self._logger.err(t, frame_str=f"{frame}")
             return False
             
         self._log_task_duration(perf_counter() - start_ts, frame)
@@ -308,21 +309,21 @@ class Secretary:
         """
         callback = self._handlers_sys.get(frame.sys_type, None)
         if not callback:
-            t = "[Secr]: Unsupported {frame_str}"
+            t = "SECR: Unsupported {frame_str}"
             self._logger.err(t, frame, frame_str=frame.format_by_mask("m"))
             return False
         if not callable(callback):
-            t = "[Secr]: Not callable! Data:{dt} {frame_str}"
+            t = "SECR: Not callable! Data:{dt} {frame_str}"
             self._logger.crt(t, frame, frame_str=frame.format_by_mask("m"), dt=callback)
             return False
         args = frame.payload.get("args", tuple())
-        self._logger.dbg("[Secr]: Call {cb} with {args}", cb=callback.__name__, args=args)
+        self._logger.dbg("SECR: Call {cb} with {args}", cb=callback.__name__, args=args)
         try:
             res = callback(*args)
-            self._logger.dbg("[Secr]: Call callback:{cb} returned:{res}", cb=callback, res=res)
+            self._logger.dbg("SECR: Call callback:{cb} returned:{res}", cb=callback, res=res)
             return True
         except Exception as e:
-            self._logger.err("[Secr]: SysCallback error: {e}", e=e)
+            self._logger.err("SECR: SysCallback error: {e}", e=e)
             return False
 
     def _process_event(self, frame: Frame) -> bool:
@@ -335,7 +336,7 @@ class Secretary:
             handler(frame)
             return True
         else:
-            t = "[Secr]: Was get evt, but module hasn't subcr {frame_str}"
+            t = "SECR: Was get evt, but module hasn't subcr {frame_str}"
             self._logger.err(t, frame, frame_str=frame.format_by_mask("mf"))
             return False
 
@@ -351,12 +352,14 @@ class Secretary:
                 RptType.CANT_DO,
                 reason=RptReason.MODULE_BUSY)
             return False
+        
         # Look for handler
         handler = self._handlers_cmd.get(frame.cmd_type)
         if handler and callable(handler):
+            self.send_rpt(frame.sender, frame.cmd_id, RptType.INTO_WORK)
             return self._execute_command(handler, frame)
         else:
-            t = "[Secr]: Command received, but no handler found {frame_str}"
+            t = "SECR: Command received, but no handler found {frame_str}"
             self._logger.err(t, frame, frame_str=frame.format_by_mask("mf"))
             self.send_rpt(frame.sender, frame.cmd_id,
                 RptType.CANT_DO,
@@ -409,6 +412,8 @@ class Secretary:
         self._module_is_busy = False
         return True
 
+    # TODO Verify the ability to request a deadline extension.
+    # TODO Verify the risk of collision between automatic and manual deadline extensions.
     def _check_deadlines(self) -> bool:
         """Validates all time constraints for outgoing and incoming tasks."""
         now = perf_counter()
@@ -416,12 +421,23 @@ class Secretary:
         # Check outgoing commands (waiting for Executor to act).
         for cmd_id, info in list(self._cmd_out.items()):
             was_work = True
-            if now > info["deadline_answ"]:
-                info["cb_timeout_answ"]({"cmd_id": cmd_id, "reason": "Reaction Timeout"})
-                self._cmd_out.pop(cmd_id)
-            elif now > info["deadline_done"]:
-                info["cb_timeout_done"]({"cmd_id": cmd_id, "reason": "Execution Timeout"})
-                self._cmd_out.pop(cmd_id)
+            rtype = None
+            if now > info["deadline_answ"]:   rtype = RptType.REACTION_TIMEOUT
+            elif now > info["deadline_done"]: rtype = RptType.EXECUTION_TIMEOUT
+            if rtype:
+                frame = None
+                try:
+                    frame = Frame(MsgType.RPT, self._addr, {"text": rtype.value}, 
+                                  rpt_type=rtype, cmd_id=cmd_id, recipient=self._addr)
+                except ValueError as e:
+                    self._logger.err("SECR: Cant create Frame for timeout-cb")
+                if frame:
+                    if now > info["deadline_answ"]:
+                        info["cb_timeout_answ"](frame)
+                        self._cmd_out.pop(cmd_id)
+                    elif now > info["deadline_done"]:
+                        info["cb_timeout_done"](frame)
+                        self._cmd_out.pop(cmd_id)
 
         # Automatic deadline extension (when we are the Executor).
         # If remaining time is below threshold - automatically request more time.
@@ -445,7 +461,7 @@ class Secretary:
         durs = [0.001, 0.01, 0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0]
         i = next((index for index, val in enumerate(durs) if dur_ms < val), len(durs))
         speed = f"speed_{i}"
-        t = "[Secr]: Done {speed}: {dur:.1f}ms {frame_str}"
+        t = "SECR: Done {speed}: {dur:.1f}ms {frame_str}"
         self._logger.dbg(t, frame, speed=speed, dur=dur_ms, frame_str=frame.format_by_mask("m"))
     
     def _set_unit(self, unit: BaseUnit) -> bool:
@@ -454,10 +470,10 @@ class Secretary:
         Only for Kernel.
         """
         if not isinstance(unit, BaseUnit):
-            self._logger.err("[Secr]: set_unit: get not BaseUnit: {unit}", unit=unit)
+            self._logger.err("SECR: set_unit: get not BaseUnit: {unit}", unit=unit)
             return False
         if self._unit is not None:
-            self._logger.err("[Secr]: set_unit: Detected second set! Obj: {unit}", unit=unit)
+            self._logger.err("SECR: set_unit: Detected second set! Obj: {unit}", unit=unit)
             return False
         self._unit = unit
         self.auto_subscribe()
@@ -484,7 +500,7 @@ class Secretary:
                         self._handle_frame(self._inbox.get_nowait())
                         readed += 1
                         if readed >= self._config.UNIT_BUS_READ_LIMIT:
-                            t = "[Secr]: Bus read limit reached ({readed})"
+                            t = "SECR: Bus read limit reached ({readed})"
                             self._logger.wrn(t, readed=readed)
                             break
                     except Empty:

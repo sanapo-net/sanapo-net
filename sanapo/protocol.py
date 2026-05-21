@@ -120,6 +120,7 @@ class Frame:
         Reconstructs a Frame from a dictionary. 
         If deep=True and payload_enums provided, attempts to restore Enums in payload.
         """
+        print("called Frame.from_dict()")
         def get_e(enum_cls, val):
             return enum_cls(val) if val is not None else None
 

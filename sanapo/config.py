@@ -5,6 +5,7 @@ class Config():
     # Kernel.
     KERNEL_TCT = 0.0025 # seconds
     ADDR_KERNEL_STR = "KERNEL"
+    ADDR_KERNEL = None
     SYS_CONSIST_DELAY = 5
     SYS_CONSIST_PATH = "sys_consists/"
     THRESHOLD_BUS_OVERCROWDED = 100
@@ -18,7 +19,7 @@ class Config():
     }
 
     # Secretary.
-    DEFAULT_CMD_DEADLINE_ANSW = 0.05    # seconds
+    DEFAULT_CMD_DEADLINE_ANSW = 0.2    # seconds
     DEFAULT_CMD_DEADLINE_DONE = 0.8     # seconds
     DEFAULT_TIME_EXTENSION = 0.5        # seconds
     DEADLINE_EXTENSION_THRESHOLD = 0.3  # seconds

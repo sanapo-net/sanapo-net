@@ -45,23 +45,29 @@ class Tier:
         if self.task != TierTask.NONE:
             return False
         else:
+            self._logger.dbg("START")
             self.task = TierTask.STARTING
             self._target_units = list(self._units)
             now = perf_counter()
             for unit in self._target_units:
                 self._unit_start_times[unit.addr] = now
                 self._attempts[unit.addr] = 0
+                self._logger.dbg("unit.start() for unit {name}", name=unit.addr.unit)
+                unit.start()
             return True
         
     def stop(self) -> bool:
         if self.task != TierTask.NONE:
             return False
         else:
+            self._logger.dbg("STOP")
             self.task = TierTask.STOPPING
             self._target_units = list(self._units)
             now = perf_counter()
             for unit in self._target_units:
                 self._unit_start_times[unit.addr] = now
+                self._logger.dbg("unit.stop() for unit {name}", name=unit.addr.unit)
+                unit.stop()
             return True
 
     def step(self) -> None:
@@ -83,7 +89,7 @@ class Tier:
             elif thread.stat in [ThreadStat.JOINING, ThreadStat.JOINED, ThreadStat.RELOADING]:
                 t = "Start unit into thread {name} witj stat {stat}"
                 self._logger.wrn(t, name=thread.name, stat=thread.stat.value)
-            unit.start()
+            
             if unit.stat == UnitStat.WORKING:
                 self._finish_unit_task(unit, "Started")
                 continue
@@ -99,7 +105,7 @@ class Tier:
                 elif attempt == 1:
                     self._esc_rebuild(unit, now)
                 elif attempt == 2:
-                    self._esc_thread_replay(unit, now)
+                    self._esc_thread_reload(unit, now)
                 elif attempt == 3:
                     self._esc_fail(unit)
 
@@ -107,7 +113,7 @@ class Tier:
 
     def _esc_reborn(self, unit: BaseUnit, now: float):
         """Attempt 1: Module restart."""
-        self._logger.wrn("{addr}: Slow start. Action: REBORN", addr=unit.addr)
+        self._logger.wrn("REBORN unit {addr}", addr=unit.addr.unit)
         unit.restart_module(force=True)
         self._attempts[unit.addr] = 1
         self._unit_start_times[unit.addr] = now
@@ -116,16 +122,19 @@ class Tier:
 
     def _esc_rebuild(self, unit: BaseUnit, now: float):
         """Attempt 2: Kernel rebuilds unit."""
-        self._logger.err("{addr}: Reborn failed. Action: REBUILD", addr=unit.addr)
+        self._logger.wrn("REBUILD unit {addr}", addr=unit.addr.unit)
         self.view.rebuild_unit(unit) 
         self._attempts[unit.addr] = 2
         self._unit_start_times[unit.addr] = now
         t = f"Rebuilding unit:{self.name}: {unit.addr}"
         self.view.emit_progress(t, self._get_num(), len(self._units))
 
-    def _esc_thread_replay(self, unit: BaseUnit, now: float):
+    def _esc_thread_reload(self, unit: BaseUnit, now: float):
         """Attempt 3: Replay the thread."""
         thread = self.view.get_manager(unit)
+        thr = thread.name
+        unt = unit.addr.unit
+        self._logger.wrn("Try RELOAD thread {thr} (for unit {unt})", thr=thr, unt=unt)
         # Check for 'living' units from other tiers.
         others = [u for u in thread._units.values() if u != unit]
         is_safe = True
@@ -136,17 +145,17 @@ class Tier:
                 break
 
         if is_safe:
-            self._logger.crt("Thread {name} STUCK. Action: REPLAY", name=thread.name)
+            self._logger.crt("Thread {thr} STUCK. Action: REPLAY", thr=thr)
             thread.reload(UnitSource.CURRENT, UnitSelection.ALL, ExecutionStrategy.WORKING)
             self._attempts[unit.addr] = 3
             self._unit_start_times[unit.addr] = now
         else:
-            self._logger.err("Thread {name} busy with others. Action: SKIP UNIT", name=thread.name)
+            self._logger.crt("Thread {thr} with others unit. Action: SKIP UNIT", thr=thr)
             self._esc_fail(unit)
 
-    def _esc_fail(self, unit: float):
+    def _esc_fail(self, unit: BaseUnit):
         """Final unit drop."""
-        self._logger.crt("Unit {addr}: DEAD after all attempts", addr=unit.addr)
+        self._logger.crt("Unit {addr}: DEAD after all attempts", addr=unit.addr.uniy)
         if unit in self._target_units:
             self._target_units.remove(unit)
 
@@ -163,9 +172,8 @@ class Tier:
 
     def _process_stopping(self, now: float):
         """Logic for checking unit shutdown progress."""
-        for unit in self._target_units:
+        for unit in list(self._target_units):
             thread = self.view.get_manager(unit)
-            unit.stop()
             # Check if unit is already dead or stopped.
             if unit.stat in self.stopped_stats:
                 if thread: thread.remove_unit(unit.addr)

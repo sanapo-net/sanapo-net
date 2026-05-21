@@ -196,32 +196,40 @@ class TcpService(threading.Thread):
         sock.sendall(header + name_bytes)
 
     def _register_connection(self, name: str, sock: socket.socket, addr: tuple):
-        """Registers the connection using the Alphabetical Tender logic."""
+        """
+        Registers a new inbound federation link after a successful handshake.
+        Resolves name collisions using system rank comparison.
+        """
+        old_conn = None
         with self._lock:
             if name in self._connections:
-                # Tender: keep connection from system with 'higher' name.
+                # Collision: if our name is alphabetically larger, we keep OUR outgoing connection,
+                # and simply drop this new incoming one to avoid bridge duplication.
                 if self._cfg.SYSTEM_NAME > name:
                     t = "TCP: Higher rank system (us), keeping existing conn to {name}."
                     self._log.inf(t, name=name)
                     sock.close()
                     return
                 else:
-                    self._connections[name].stop()
+                    # Our old connection is alphabetically smaller — removing it from cache for safe closure
+                    old_conn = self._connections.pop(name)
+        if old_conn:
+            old_conn.stop()
 
-            conn = TcpConnection(name, sock, addr, self._broker, self._log, self._cfg)
+        conn = TcpConnection(name, sock, addr, self._broker, self._log, self._cfg)
+        conn._service = self
+        with self._lock:
             self._connections[name] = conn
-            conn.start()
-            self._log.inf("TCP: Federation link with '{name}' established.", name=name)
-            
-            report = {
-                "msg_type": "sys",
-                "sub_type": "net_connected",
-                "sender": "LOCAL:TCP_SERVICE",
-                "recipient": "LOCAL:KERNEL",
-                "payload": {"sys_name": name}
-            }
-            self._broker.bus.put(report)
-
+        conn.start()
+        self._log.inf("TCP: Federation link with '{name}' established.", name=name)
+        msg = {
+            "msg_type": "sys",
+            "sub_type": "net_connected",
+            "sender": "LOCAL:TCP_SERVICE",
+            "recipient": "LOCAL:KERNEL",
+            "payload": {"sys_name": name}
+        }
+        self._broker.bus.put(msg)
 
     def send_to_system(self, system_name: str, payload: bytes) -> bool:
         """Sends to a named system (Federated routing)."""

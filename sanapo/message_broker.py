@@ -1,6 +1,7 @@
 # sanapo/message_broker.py
 from __future__ import annotations
 import queue
+import threading
 from typing import TYPE_CHECKING, Optional
 
 from sanapo.enums import MsgType, SysType, RptType, RptReason
@@ -35,6 +36,8 @@ class MessageBroker:
         # Subscription registry: {EventEnum: {set of Subscriber Addresses}}
         self._subscribers: dict[any, set[Addr]] = {}
         self._tcp_service: Optional[TcpService] = None
+        self.addr = Addr(config.SYSTEM_NAME, config.ADDR_BROKER_STR)
+        self._addr_lock = threading.Lock()
 
     def set_tcp_service(self, service: TcpService):
         """Link the broker to the network infrastructure."""
@@ -83,7 +86,9 @@ class MessageBroker:
         # 2. SYSTEM: Internal signaling and subscriptions
         elif frame.msg_type == MsgType.SYS:
             self._handle_system(frame)
-            self._deliver(frame, self._cfg.ADDR_KERNEL_STR)
+            # Deliver to legitimate Addr object instead of clean config string
+            self._deliver(frame, self._cfg.ADDR_KERNEL)
+
 
         # 3. COMMANDS / REPORTS: Direct delivery
         else:
@@ -134,7 +139,7 @@ class MessageBroker:
         if frame.msg_type == MsgType.CMD:
             report = Frame(
                 msg_type=MsgType.RPT,
-                sender=self._cfg.ADDR_BROKER,
+                sender=self.addr,
                 recipient=frame.sender,
                 rpt_type=RptType.CANT_DO,
                 cmd_id=frame.cmd_id,
@@ -143,53 +148,39 @@ class MessageBroker:
             )
             self._deliver(report, frame.sender)
 
+    def _normalize_str(self, addr_str: str) -> str:
+        """Helper to ensure the address always has a system prefix."""
+        if not addr_str: return ""
+        return addr_str if ":" in addr_str else f"{self._cfg.SYSTEM_NAME}:{addr_str}"
+
     def find_addr(self, addr_str: str) -> Addr | None:
-        """
-        Only looks up existing addresses in the registry. 
-        Does NOT create new objects.
-        """
-        temp = Addr.from_str(addr_str)
-        if not temp: return None
-        # Normalize: if system matches local config, look for 'LOCAL'
-        sys_part = "LOCAL" if temp.system == self._cfg.SYSTEM_NAME else temp.system
-        cache_key = f"{sys_part}:{temp.unit}"
-        return self._addr_book.get(cache_key)
+        """Only looks up existing addresses in the registry."""
+        full_str = self._normalize_str(addr_str)
+        if not full_str: return None
+        with self._addr_lock:
+            return self._addr_book.get(full_str)
 
     def ensure_addr(self, addr_str: str) -> Addr | None:
-        """
-        Returns an existing Addr or creates a new one if not found.
-        Guarantees an Addr object return for valid strings.
-        """
-        # Try to find existing first
-        existing = self.find_addr(addr_str)
-        if existing:
-            return existing
-        
-        # If not found, use creation logic (without duplicate check)
-        temp_addr = Addr.from_str(addr_str)
-        if not temp_addr: return None
-        
-        sys_part = "LOCAL" if temp_addr.system == self._cfg.SYSTEM_NAME else temp_addr.system
-        addr = Addr(unit=temp_addr.unit, system=sys_part)
-        
-        cache_key = f"{sys_part}:{temp_addr.unit}"
-        self._addr_book[cache_key] = addr
-        return addr
+        """Returns an existing Addr or creates a new one if not found."""
+        full_str = self._normalize_str(addr_str)
+        if not full_str: return None
+        with self._addr_lock:
+            if full_str not in self._addr_book:
+                temp = Addr.from_str(full_str)
+                self._addr_book[full_str] = Addr(temp.system, temp.unit)
+            return self._addr_book[full_str]
 
     def create_addr(self, addr_str: str) -> Addr | None:
-        """
-        Attempts to register a NEW unique address. 
-        Returns None if the address already exists.
-        """
-        if self.find_addr(addr_str):
-            return None
-        return self.ensure_addr(addr_str)
+        """Attempts to register a NEW unique address."""
+        full_str = self._normalize_str(addr_str)
+        with self._addr_lock:
+            if full_str in self._addr_book:
+                return None
+        return self.ensure_addr(full_str)
 
-        
-    def deregister_addr(self, addr:Addr) -> bool:
-        cache_key = f"{addr.system}:{addr.unit.unit}"
-        del_addr = self._addr_book.pop(cache_key, None)
-        if del_addr:
-            return True
-        else:
-            return False
+    def deregister_addr(self, addr: Addr) -> bool:
+        """Removes an address reference from the internal cache book."""
+        cache_key = f"{addr.system}:{addr.unit}"
+        with self._addr_lock:
+            del_addr = self._addr_book.pop(cache_key, None)
+        return del_addr is not None

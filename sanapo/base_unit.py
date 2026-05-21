@@ -18,10 +18,11 @@ class BaseUnit():
             config: Config,
             addr: Addr,
             type: UnitType,
+            addr_by_str: callable,
             module_class: any,
             module_params: dict[str, any],
             logger: Logger,
-            secr: Secretary | None = None
+            secr: Secretary | None = None,
         ) -> None:
         self._config: Config = config
         self._logger: Logger = logger
@@ -66,6 +67,7 @@ class BaseUnit():
                 UnitType.TICKABLE: [1,0],
             }
         }
+        self.addr_by_str: callable = addr_by_str
         self.create_module()       
 
     def create_module(self) -> bool:
@@ -91,9 +93,7 @@ class BaseUnit():
 
     def restart_module(self, force: bool = False) -> bool:
         """Full restart of the module logic within the existing unit."""
-        t = "Rebirth of module in {addr} initiated (force={force})"
-        self._logger.inf(t, addr=self.addr, force=force)
-
+        self._logger.dbg("UNIT: RESTART:begin (force={force})", force=force)
         # Shutting down the old module.
         if self._module:
             try:
@@ -107,14 +107,17 @@ class BaseUnit():
                     self.stat = UnitStat.REBIRTHING 
                     return True
             except Exception as e:
-                self._logger.err("Error during module rebirthing: {e}", e=e)
+                self._logger.err("Error during module restarting: {e}", e=e)
                 return False
 
         # Create and start new module.
         self.create_module()
         if self.stat == UnitStat.CREATED:
             self.start()
+        self._logger.dbg("UNIT: RESTART:end (force={force})", force=force)
         return True
+    
+
 
     def step(self) -> bool:
         now = perf_counter()
@@ -126,22 +129,32 @@ class BaseUnit():
         
         if self.stat == UnitStat.STARTING:
             if self._needs_start:
-                self._module.start()
+                self._logger.dbg("UNIT: module.start()")
+                res = self._module.start()
                 self._needs_start = False
+                if res is not False:
+                    self.started()
+                    return True
             if self._deadline and now >= self._deadline:
-                self.stat = UnitStat.WORKING
+                self.started()
                 self._deadline = None
-                self._logger.inf("Forced to STARTED by timeout")
+                self._logger.wrn("UNIT: STARTED. Forced by timeout")
                 return False
 
         if self.stat == UnitStat.STOPPING:
             if self._needs_stop:
-                self._module.stop()
+                self._logger.dbg("UNIT: module.stop()")
+                res = self._module.stop()
                 self._needs_stop = False
+                if res is not False:
+                    self.stat = UnitStat.STOPPED
+                    self._deadline = None
+                    self._logger.dbg("UNIT: STOPPED")
+                    return True
             if self._deadline and now >= self._deadline:
                 self.stat = UnitStat.STOPPED
                 self._deadline = None
-                self._logger.inf("Forced to STOPPED by timeout")
+                self._logger.wrn("UNIT: STOPPED. Forced by timeout")
                 return False
         
         if self.stat == UnitStat.STOPPED:
@@ -164,27 +177,43 @@ class BaseUnit():
     def start(self, timeout: float | None = None) -> None:
         if self.stat in (UnitStat.STARTING, UnitStat.WORKING):
             return
+        self._logger.dbg("UNIT: START")
         self.stat = UnitStat.STARTING
         self._needs_start = True
         timeout = timeout if timeout else self.start_timeout
         self._deadline = perf_counter() + timeout
     
     def started(self) -> None:
+        self._logger.dbg("UNIT: STARTED")
         self.stat = UnitStat.WORKING
     
     def sleep(self) -> None:
+        self._logger.dbg("UNIT: SLEEP")
         self.stat = UnitStat.SLEEPING
 
     def wakeup(self) -> None:
+        self._logger.dbg("UNIT: WAKEUP")
         self.stat = UnitStat.WORKING
 
     def stop(self, timeout: float | None = None) -> None:
+        self._logger.dbg("UNIT: STOP")
         self.stat = UnitStat.STOPPING
         self._needs_stop = True
         timeout = timeout if timeout else self.stop_timeout
         self._deadline = perf_counter() + timeout
 
+    def stop(self, timeout: float | None = None) -> None:
+        if self.stat in (UnitStat.STOPPING, UnitStat.STOPPED):
+            return
+        self._logger.dbg("UNIT: STOP")
+        self.stat = UnitStat.STOPPING
+        self._needs_stop = True
+        timeout = timeout if timeout else self.stop_timeout
+        self._deadline = perf_counter() + timeout
+
+
     def destroy(self) -> bool:
+        self._logger.dbg("UNIT: DESTROY")
         dont_work = [UnitStat.CREATED, UnitStat.STOPPED, UnitStat.DESTROYED, UnitStat.HALTED]
         if not self._is_destroying:
             self._is_destroying = True
@@ -205,6 +234,7 @@ class BaseUnit():
     
     def mutate(self, new_type: UnitType) -> bool:
         """Changes unit type on the fly"""
+        self._logger.dbg("UNIT: mutate to {type}", type=new_type)
         if not isinstance(new_type, UnitType):
             t = "Change UnitType, expected UnitType, got {type}"
             self._logger.err(t, type=type(new_type))
@@ -255,9 +285,10 @@ class UnitModuleView:
         self.addr: Addr = unit.addr
 
         # --- Status Control Signals ---
-        self.started = unit.started # Switch to WORKING
-        self.sleep = unit.sleep     # Switch to SLEEPING
-        self.wakeup = unit.wakeup   # Switch to WORKING
+        self.started: callable = unit.started # Switch to WORKING
+        self.sleep: callable = unit.sleep     # Switch to SLEEPING
+        self.wakeup: callable = unit.wakeup   # Switch to WORKING
+        self.addr_by_str: callable = unit.addr_by_str
 
     # --- Read-only Properties ---
     @property

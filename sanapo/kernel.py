@@ -20,7 +20,7 @@ from sanapo.base_unit import BaseUnit
 from sanapo.manifest import Manifest
 from sanapo.protocol import Frame
 from sanapo.tier import Tier
-from sanapo.views import KernelTierView, KernelBootMasterView, KernelUserView
+from sanapo.views import KernelTierView, KernelBootMasterView
 from sanapo.transport.adapters.queue import QueueAdapterTransport
 from sanapo.enums import UnitType, EnumRegistry, ThreadType
 
@@ -54,7 +54,7 @@ class Kernel:
         # Infrastructure
         self._reg = enum_reg
         self._cfg: Config = Config()
-        self._addr: Addr = Addr(self._cfg.ADDR_KERNEL_STR)
+        self._addr: Addr = Addr(self._cfg.SYSTEM_NAME, self._cfg.ADDR_KERNEL_STR)
         self._log: Logger = Logger(self._addr, self._cfg)
         self._translator: Translator = Translator(self._cfg, self._log)
         self._log.set_translator(self._translator)
@@ -66,6 +66,8 @@ class Kernel:
 
         # Views
         self.tier_view = KernelTierView(self)
+
+        self._cfg.ADDR_KERNEL = self._addr
 
     # --- System Configuration (Registration) ---
 
@@ -254,8 +256,12 @@ class Kernel:
                     t = "Unit {u} is created, but tier {t} is not auto-created. Unit del:{d}"
                     self._log.crt(t, u=addr.unit, t=f"{tier_name}|{tier_layer}", d=delleting)
                     return False
-            tier._units.append(unit)
             
+            # For routing
+            tier._units.append(unit)
+            transport = QueueAdapterTransport(unit.addr, unit._secr._inbox)
+            self._broker.register_local_route(transport)
+
             self._units[addr] = unit
             self._recipes_units[addr] = filtered_params
             return unit
@@ -267,11 +273,6 @@ class Kernel:
         for cfg in configs:
             unit = self.add_unit(**cfg)
             if not unit: continue
-
-            # Routing
-            transport = QueueAdapterTransport(unit.addr, unit.secr._inbox)
-            self._broker.register_local_route(transport)
-            res[unit.addr.unit] = unit
 
         if unit.manifest and unit.manifest.is_persistent:
             need_dump = True
@@ -315,10 +316,11 @@ class Kernel:
                 config=self._cfg,
                 addr=addr,
                 type=cfg.get("u_type", UnitType.TICKABLE),
+                addr_by_str=self._broker.ensure_addr,
                 module_class=cfg["m_class"],
                 module_params=cfg.get("m_params", {}),
                 logger=logger,
-                secr=secr
+                secr=secr,
             )
         except (TypeError, ValueError, AttributeError) as e:
             self._log.err("Unit not assembled. Didn't get BaseUnit (Name={n}): {e}", n=name, e=e)
@@ -472,12 +474,13 @@ class Kernel:
     def stop(self) -> None:
         """Starts the shutdown sequence."""
         if self._is_shutdowning: return
+        self._log.inf("STOP")
         self._is_shutdowning = True
         self._boot_master.shutdown()
 
     def start(self) -> None:
         """Starts all managers and initiates tier ignition"""
-        self._log.inf("Ignition sequence started")
+        self._log.inf("START")
         self._is_running = True
         self._boot_master.ignite()
 

@@ -81,6 +81,8 @@ class RptType(str, Enum):
     CANT_DO = "cant_do"
     NO_REGISTRED_EXECUTOR = "executor_missing"
     NO_SUBSCRIBED_EXECUTOR = "no_subscribed_executor"
+    REACTION_TIMEOUT = "reaction_timeout"
+    EXECUTION_TIMEOUT = "execution_timeout"
 
 @unique
 class RptReason(str, Enum):
