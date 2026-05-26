@@ -82,6 +82,8 @@ class Secretary:
             SysType.U_STEP: self._unit.step,
             SysType.U_REBORN: self._unit.restart_module,
             SysType.U_MUTATE: self._unit.mutate,
+            SysType.NET_CONNECTED: self._unit.on_net_connected,
+            SysType.NET_DISCONNECTED: self._unit.on_net_disconnected,
         }
 
     def modify_deadline(self, cmd_id: str, add_to_deadline: float) -> bool:
@@ -309,8 +311,8 @@ class Secretary:
         """
         callback = self._handlers_sys.get(frame.sys_type, None)
         if not callback:
-            t = "SECR: Unsupported {frame_str}"
-            self._logger.err(t, frame, frame_str=frame.format_by_mask("m"))
+            t = "SECR: Unsupported {tframe}"
+            self._logger.err(t, tframe=f"{frame}")
             return False
         if not callable(callback):
             t = "SECR: Not callable! Data:{dt} {frame_str}"
@@ -319,7 +321,7 @@ class Secretary:
         args = frame.payload.get("args", tuple())
         self._logger.dbg("SECR: Call {cb} with {args}", cb=callback.__name__, args=args)
         try:
-            res = callback(*args)
+            res = callback(frame)
             self._logger.dbg("SECR: Call callback:{cb} returned:{res}", cb=callback, res=res)
             return True
         except Exception as e:
@@ -375,7 +377,7 @@ class Secretary:
         cmd_info = self._cmd_out.get(frame.cmd_id)
         if not cmd_info:
             t = "Get report with unknowed cmd_id {frame_str}"
-            self._logger.err(t, frame, frame.format_by_mask("mfi"))
+            self._logger.err(t, frame, frame_str=frame.format_by_mask("mfi"))
             return res
 
         if frame.rpt_type == RptType.INTO_WORK:

@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from sanapo.base_module import BaseModule
     from sanapo.manifest import Manifest
     from sanapo.addr import Addr
+    from sanapo.protocol import Frame
 
 class BaseUnit():
     def __init__(self,
@@ -117,8 +118,6 @@ class BaseUnit():
         self._logger.dbg("UNIT: RESTART:end (force={force})", force=force)
         return True
     
-
-
     def step(self) -> bool:
         now = perf_counter()
 
@@ -132,10 +131,10 @@ class BaseUnit():
                 self._logger.dbg("UNIT: module.start()")
                 res = self._module.start()
                 self._needs_start = False
-                if res is not False:
+                if res:
                     self.started()
                     return True
-            if self._deadline and now >= self._deadline:
+            elif self._deadline and now >= self._deadline:
                 self.started()
                 self._deadline = None
                 self._logger.wrn("UNIT: STARTED. Forced by timeout")
@@ -184,6 +183,7 @@ class BaseUnit():
         self._deadline = perf_counter() + timeout
     
     def started(self) -> None:
+        self._deadline = None
         self._logger.dbg("UNIT: STARTED")
         self.stat = UnitStat.WORKING
     
@@ -196,13 +196,6 @@ class BaseUnit():
         self.stat = UnitStat.WORKING
 
     def stop(self, timeout: float | None = None) -> None:
-        self._logger.dbg("UNIT: STOP")
-        self.stat = UnitStat.STOPPING
-        self._needs_stop = True
-        timeout = timeout if timeout else self.stop_timeout
-        self._deadline = perf_counter() + timeout
-
-    def stop(self, timeout: float | None = None) -> None:
         if self.stat in (UnitStat.STOPPING, UnitStat.STOPPED):
             return
         self._logger.dbg("UNIT: STOP")
@@ -210,7 +203,6 @@ class BaseUnit():
         self._needs_stop = True
         timeout = timeout if timeout else self.stop_timeout
         self._deadline = perf_counter() + timeout
-
 
     def destroy(self) -> bool:
         self._logger.dbg("UNIT: DESTROY")
@@ -271,6 +263,27 @@ class BaseUnit():
 
         self.start_timeout = target_start
         self.stop_timeout = target_stop
+
+    def on_net_connected(self, frame: Frame) -> None:
+        """System bridge to forward connection event to the user module."""
+        system_name = frame.payload.get("sys_name")
+        if system_name:
+            if self._module and hasattr(self._module, 'on_net_connected'):
+                try:
+                    self._module.on_net_connected(system_name)
+                except Exception as e:
+                    self._logger.err("User on_net_connected callback crashed: {e}", e=e)
+
+    def on_net_disconnected(self, frame: Frame) -> None:
+        """System bridge to forward disconnection event to the user module."""
+        system_name = frame.payload.get("sys_name")
+        if system_name:
+            if self._module and hasattr(self._module, 'on_net_disconnected'):
+                try:
+                    self._module.on_net_disconnected(system_name)
+                except Exception as e:
+                    self._logger.err("User on_net_disconnected callback crashed: {e}", e=e)
+
 
 
 class UnitModuleView:

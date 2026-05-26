@@ -1,4 +1,5 @@
 # sanapo/transport/services/udp.py
+from __future__ import annotations
 import socket
 import threading
 import struct
@@ -36,12 +37,14 @@ class UdpBeacon(threading.Thread):
             # Enable broadcasting
             s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             
-            self._log.inf("UDP: Beacon started for '{name}'", name=self._cfg.SYSTEM_NAME)
+            self._log.inf("UDP: Beacon started as '{name}'", name=self._cfg.SYSTEM_NAME)
             
             while self._is_running:
                 try:
-                    # Send to the whole local network
-                    s.sendto(self._packet, ('<broadcast>', self._cfg.UDP_PORT_DEFAULT))
+                    # ONLY SEND IF DISCOVERY MODE IS ACTIVE IN CONFIG
+                    if self._cfg.NET_AUTO_CONNECT:
+                        # Send to the whole local network
+                        s.sendto(self._packet, ('<broadcast>', self._cfg.UDP_PORT_DEFAULT))
                 except Exception as e:
                     self._log.err("UDP: Beacon send error: {e}", e=e)
                 
@@ -78,6 +81,9 @@ class UdpListener(threading.Thread):
     def _process_beacon(self, data: bytes, addr: tuple):
         """Parses incoming beacon and initiates TCP connection if new."""
         try:
+            # On/Off NET_AUTO_CONNECT cheking
+            if not getattr(self._cfg, 'NET_AUTO_CONNECT', True):
+                return
             # First check if it's even worth unpacking (header size)
             if len(data) < 16: return
             

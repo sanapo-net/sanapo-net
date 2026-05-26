@@ -70,6 +70,7 @@ class SysType(str, Enum):
     # Transport
     RAW = "raw"
     NET_CONNECTED = "net_connected"
+    NET_DISCONNECTED = "net_disconnected"
     REG_UNIT = "reg_unit"
 
 @unique
@@ -187,6 +188,55 @@ class EnumRegistry:
 
     # 4. service
     logs: Type[Logs]
+
+    @classmethod
+    def create_default(cls, evt_cls: Type[Enum], cmd_cls: Type[Enum]) -> 'EnumRegistry':
+        """Factory method to assemble a full registry using native framework enums."""
+        return cls(
+            addr=Addr,
+            msg=MsgType,
+            sys=SysType,
+            rpt=RptType,
+            reason=RptReason,
+            evt=evt_cls,       # Project-specific enums
+            cmd=cmd_cls,       # Project-specific enums
+            u_type=UnitType,
+            u_stat=UnitStat,
+            t_type=ThreadType,
+            t_stat=ThreadStat,
+            tier_stop=ShutdownTier,
+            source=UnitSource,
+            selection=UnitSelection,
+            transp_stat=TranspReadStat,
+            logs=Logs
+        )
+    
+# Register
+@dataclass
+class EnumRegistry:
+    """Registry strictly for frame serialization and network protocol mapping."""
+    # 1. Mandatory for Frame reconstruction
+    addr: Type[Addr]
+    msg: Type[MsgType]
+    sys: Type[SysType]
+    rpt: Type[RptType]
+    reason: Type[RptReason]
+    evt: Type[Enum] # from project-specific code
+    cmd: Type[Enum] # from project-specific code
+
+    @classmethod
+    def create_default(cls, evt_cls: Type[Enum], cmd_cls: Type[Enum]) -> 'EnumRegistry':
+        """Factory method to assemble a light protocol registry using native enums."""
+        return cls(
+            addr=Addr,
+            msg=MsgType,
+            sys=SysType,
+            rpt=RptType,
+            reason=RptReason,
+            evt=evt_cls,
+            cmd=cmd_cls
+        )
+
 
 class SanapoError(Exception): pass
 class ModuleAddressError(SanapoError): pass

@@ -65,5 +65,6 @@ class TcpAdapterTransport(BaseAdapterTransport):
     def is_ready(self) -> bool:
         """Checks if the network service and target are available."""
         if isinstance(self.spec_addr, str):
-            return self._service.is_alive(self.spec_addr)
-        return self._service.is_alive_addr(self.spec_addr)
+            return self._service.is_conn_alive(self.spec_addr)
+        return self._service.is_conn_alive_addr(self.spec_addr)
+

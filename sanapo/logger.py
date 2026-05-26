@@ -1,6 +1,5 @@
 # core/logger.py
 from __future__ import annotations
-import os
 import json
 import inspect
 import logging
@@ -24,12 +23,6 @@ class Logger:
                 config: Config,
                 translator: Translator | None = None
             ) -> None:
-        if isinstance(addr, Addr):
-            self._addr = addr.unit
-        elif isinstance(addr, str):
-            self._addr = addr
-        else:
-            self._addr = "UNKNOWN"
         self._addr = f"[{addr}]"
         self._cfg = config
         self._translator: Translator | None = translator
@@ -73,7 +66,7 @@ class Logger:
                 trc_str += f"\n\033[91m{traceback.format_exc()}\033[0m"
 
         time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        log_str = f"{time_str} {level.value} {self._addr}: {translated_text}{trc_str}."
+        log_str = f"{time_str} {level.value} {self._addr}: {translated_text}{trc_str}"
 
         # Console.
         if level in self._cfg.DEFAULT_LOG_FLAGS["console"]:

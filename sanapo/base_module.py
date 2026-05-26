@@ -24,6 +24,14 @@ class BaseModule:
         """
         return {}
     
+    def on_net_connected(self, system_name: str):
+        """Callback fired automatically when a network link is established."""
+        pass
+
+    def on_net_disconnected(self, system_name: str):
+        """Callback fired automatically when a network link is lost."""
+        pass
+    
     def step(self):
         """Doings for every step here"""
         pass

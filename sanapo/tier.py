@@ -85,6 +85,7 @@ class Tier:
         for unit in list(self._target_units):
             thread = self.view.get_manager(unit)
             if thread.stat == ThreadStat.CREATED:
+                self._logger.dbg("thread.start() for {name}", name=thread.name)
                 thread.start()
             elif thread.stat in [ThreadStat.JOINING, ThreadStat.JOINED, ThreadStat.RELOADING]:
                 t = "Start unit into thread {name} witj stat {stat}"

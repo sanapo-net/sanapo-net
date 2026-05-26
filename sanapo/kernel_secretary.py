@@ -27,25 +27,12 @@ class KernelSecretary(Secretary):
             resurrect_func=kernel.resurrect_frame
         )
         self._kernel = kernel
+        self.auto_subscribe()
+
 
     def auto_subscribe(self) -> None:
-        pass
-
-    def _process_system(self, frame: Frame) -> bool:
-        """
-        Kernel-level system message orchestration.
-        """
-        if super()._process_system(frame):
-            return True
-
-        if frame.sys_type == SysType.NET_CONNECTED:
-            remote_sys = frame.payload.get("sys_name")
-            self._kernel.handle_new_federation(remote_sys)
-            return True
-            
-        elif frame.sys_type == SysType.REG_UNIT:
-            manifest_data = frame.payload.get("manifest")
-            self._kernel.register_remote_unit(manifest_data)
-            return True
-
-        return False
+        self._handlers_sys: dict[SysType, callable] = {
+            SysType.NET_CONNECTED: self._kernel.handle_new_federation,
+            SysType.REG_UNIT: self._kernel.register_remote_unit,
+            SysType.SUB: self._kernel.register_remote_unit,
+        }

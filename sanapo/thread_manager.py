@@ -110,7 +110,9 @@ class ThreadManager:
         # Create an "agent" (Runner) and give him a copy of the list of units.
         units_to_run = list(self._units.values())
         if start_units:
-            for unit in units_to_run: unit.start()
+            for unit in units_to_run:
+                self._logger.dbg("unit.start() for {name}", name=unit.addr.unit)
+                unit.start()
         self._thread = threading.Thread(
             target=self._run_loop, 
             args=(units_to_run,), 
@@ -214,6 +216,7 @@ class ThreadManager:
         max_u_timeout = 0.0
         for unit in self._units.values():
             if unit.stat not in [UnitStat.STOPPED, UnitStat.HALTED]:
+                self._logger.dbg("unit.stop() for {name}", name=unit.addr.unit)
                 unit.stop()
                 if unit.stop_timeout > max_u_timeout:
                     max_u_timeout = unit.stop_timeout

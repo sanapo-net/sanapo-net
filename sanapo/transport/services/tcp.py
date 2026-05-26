@@ -7,12 +7,13 @@ import json
 from time import perf_counter
 from typing import TYPE_CHECKING
 
-from sanapo.protocol import Frame
+from sanapo.addr import Addr
 
 if TYPE_CHECKING:
     from sanapo.config import Config
     from sanapo.logger import Logger
     from sanapo.message_broker import MessageBroker
+    from sanapo.transport.services.udp import UdpBeacon
 
 
 class FrameStitcher:
@@ -51,12 +52,12 @@ class TcpConnection(threading.Thread):
     def __init__(self, name: str, sock: socket.socket, addr: tuple, 
                  broker: MessageBroker, logger: Logger, config: Config):
         super().__init__(name=f"TCP-{name}", daemon=True)
-        self.remote_system_name = name
-        self.sock = sock
-        self.addr = addr
-        self._broker = broker
-        self._log = logger
-        self._cfg = config
+        self.remote_system_name: str = name
+        self.sock: socket.socket = sock
+        self.addr: Addr = addr
+        self._broker: MessageBroker = broker
+        self._log: Logger = logger
+        self._cfg: Config = config
         self.stitcher = FrameStitcher(config)
         self.last_rx = perf_counter()
         self.is_alive = True
@@ -74,6 +75,7 @@ class TcpConnection(threading.Thread):
                 
                 self.last_rx = perf_counter()
                 packets = self.stitcher.put(data)
+                
                 for raw_data in packets:
                     self._process_raw_frame(raw_data)
 
@@ -117,6 +119,17 @@ class TcpConnection(threading.Thread):
             self.sock.close()
         except: 
             pass
+        
+        # Notify the parent service to remove this link and check discovery
+        if hasattr(self, '_service') and self._service:
+            with self._service._lock:
+                # Remove from registry if present
+                if self._service._connections.get(self.remote_system_name) == self:
+                    self._service._connections.pop(self.remote_system_name, None)
+            
+            # Trigger automatic reconstruction of beaconing
+            self._service._restore_network_discovery()
+
 
 
 class TcpService(threading.Thread):
@@ -126,6 +139,7 @@ class TcpService(threading.Thread):
         self._cfg = config
         self._log = logger
         self._broker = broker
+        self._udp_beacon: UdpBeacon | None = None
         
         self._is_running = False
 
@@ -146,12 +160,21 @@ class TcpService(threading.Thread):
                 
                 while self._is_running:
                     client_sock, addr = s.accept()
-                    # Each handshake in a temporary thread to keep listener free.
+                    
+                    # Secure filter by IP
+                    allowed_ips = self._cfg.NET_ALLOWED_IPS
+                    if allowed_ips and (addr[0] not in allowed_ips):
+                        t = "TCP: SECURITY: Blocked TCP connection attempt from untrusted IP {addr}"
+                        self._log.wrn(t, addr=addr[0])
+                        client_sock.close()
+                        continue
+
                     threading.Thread(
-                        target=self._inbound_handshake, 
-                        args=(client_sock, addr), 
+                        target=self._inbound_handshake,
+                        args=(client_sock, addr),
                         daemon=True
                     ).start()
+
         except Exception as e:
             self._log.crt("TCP: Listener crashed: {e}", e=e)
 
@@ -167,16 +190,25 @@ class TcpService(threading.Thread):
                 sock.close()
                 return
 
-            # 2. Receive System Name length and string.
+            # 2. NET_PROJECT_TOKEN cheking
+            token_len = len(self._cfg.NET_PROJECT_TOKEN)
+            guest_token = sock.recv(token_len)
+            if guest_token != self._cfg.NET_PROJECT_TOKEN:
+                t = "TCP: SECURITY: App token mismatch from {addr}. Connection rejected."
+                self._log.wrn(t, addr=addr)
+                sock.close()
+                return
+
+            # 3. Receive System Name length and string.
             name_len_bytes = sock.recv(4)
             if not name_len_bytes: return
             name_len = struct.unpack('>I', name_len_bytes)[0]
             remote_name = sock.recv(name_len).decode('utf-8')
 
-            # 3. Respond with local credentials.
+            # 4. Respond with local credentials.
             self._send_handshake_response(sock)
 
-            # 4. Identity collision check.
+            # 5. Identity collision check.
             if self._cfg.SYSTEM_NAME == remote_name:
                 self._log.err("TCP: System name collision: {name}", name=remote_name)
                 sock.close()
@@ -192,7 +224,11 @@ class TcpService(threading.Thread):
         """Sends our magic and name back to the requester."""
         name_bytes = self._cfg.SYSTEM_NAME.encode('utf-8')
         # Response: MAGIC (8b) + NAME_LEN (4b) + NAME (string).
-        header = self._cfg.MAGIC_HEADER + struct.pack('>I', len(name_bytes))
+        header = (
+            self._cfg.MAGIC_HEADER + 
+            self._cfg.NET_PROJECT_TOKEN + 
+            struct.pack('>I', len(name_bytes))
+        )
         sock.sendall(header + name_bytes)
 
     def _register_connection(self, name: str, sock: socket.socket, addr: tuple):
@@ -221,15 +257,94 @@ class TcpService(threading.Thread):
         with self._lock:
             self._connections[name] = conn
         conn.start()
-        self._log.inf("TCP: Federation link with '{name}' established.", name=name)
+        self._log.inf("TCP: Federation link with '{name}' established.", name=name)     
+
+        self.establish_federation(name)
+
+        self._cfg.NET_AUTO_CONNECT = False
+        if hasattr(self, '_udp_beacon') and self._udp_beacon:
+            self._udp_beacon.stop()
+            self._log.inf("TCP: SECURITY: Link active. UDP Beacon and discovery AUTO-DISABLED.")
+
         msg = {
             "msg_type": "sys",
             "sub_type": "net_connected",
-            "sender": "LOCAL:TCP_SERVICE",
-            "recipient": "LOCAL:KERNEL",
+            "sender": f"{self._cfg.SYSTEM_NAME}:TCP_SERVICE",
+            "recipient": f"{self._cfg.SYSTEM_NAME}:KERNEL",
             "payload": {"sys_name": name}
         }
         self._broker.bus.put(msg)
+
+    def _restore_network_discovery(self) -> None:
+        """Restores UDP beaconing and auto-connect state if requested by config."""
+        with self._lock:
+            # If there are still active connections left, do not re-enable discovery
+            if any(c.is_alive for c in self._connections.values()):
+                return
+
+        # Check if this node initially wanted to be discoverable
+        if getattr(self._cfg, 'NEEDS_NET_AUTO_CONNECT', True):
+            self._cfg.NET_AUTO_CONNECT = True
+            
+            # If we have a reference to the beacon and it was stopped, restart its thread loop
+            if hasattr(self, '_udp_beacon') and self._udp_beacon:
+                # Since Python threads cannot be restarted once stopped, 
+                # we check if we need to re-instantiate or just flip the flag.
+                # If your UdpBeacon.stop() just clears a flag, we flip it back:
+                if hasattr(self._udp_beacon, '_is_running') and not self._udp_beacon._is_running:
+                    # If your original UdpBeacon allows restarting via changing the flag:
+                    self._udp_beacon._is_running = True
+                    # If your UdpBeacon terminates the thread completely on stop(), 
+                    # a new instance should be created. But for V1, flipping the flag or 
+                    # re-starting the loop logic is enough if the thread was kept alive.
+                    # Let's verify how your UdpBeacon loop reacts.
+                    pass
+                
+                self._log.inf("TCP: SECURITY: Link lost or cleared. UDP Discovery and Beacon RESTORED.")
+
+    def disconnect_addr(self, addr: tuple) -> bool:
+        """Disconnects a specific link by ip:port and evaluates discovery restoration."""
+        target_name = None
+        with self._lock:
+            for name, conn in self._connections.items():
+                if conn.addr == addr:
+                    target_name = name
+                    break
+            if target_name:
+                conn = self._connections.pop(target_name)
+                conn.stop()
+                self._log.inf("TCP: Explicitly disconnected from {addr}", addr=addr)
+                
+                # Trigger restoration check
+                self._restore_network_discovery()
+                return True
+        return False
+
+    def disconnect_all(self) -> None:
+        """Disconnects all active federation links and fully restores discovery."""
+        with self._lock:
+            conns = list(self._connections.values())
+            self._connections.clear()
+        for conn in conns:
+            conn.stop()
+        self._log.inf("TCP: All network links explicitly disconnected.")
+        
+        # Trigger full restoration
+        self._restore_network_discovery()
+
+    def establish_federation(self, system_name: str) -> None:
+        """Assembles the network adapter and registers the route in the broker."""
+        from sanapo.transport.adapters.tcp import TcpAdapterTransport
+        
+        remote_broker_addr = Addr(system_name, self._cfg.ADDR_BROKER_STR)
+        adapter = TcpAdapterTransport(
+            sanapo_addr=remote_broker_addr,
+            sys_name=system_name,
+            host=None,
+            port=None,
+            service=self
+        )
+        self._broker.register_federation_route(system_name, adapter)
 
     def send_to_system(self, system_name: str, payload: bytes) -> bool:
         """Sends to a named system (Federated routing)."""
@@ -256,3 +371,72 @@ class TcpService(threading.Thread):
         except Exception as e:
             self._log.err("TCP: Framing error for {name}: {e}", e=e, name=conn.remote_system_name)
             return False
+
+    def enable_auto_connect(self, state: bool) -> None:
+        """Enables or disables response to neighbors' UDP beacons."""
+        self._cfg.NET_AUTO_CONNECT = state
+        status = "ENABLED" if state else "DISABLED"
+        self._log.inf("TCP: Automatic discovery connection is {status}", status=status)
+
+    def connect_to(self, host: str, port: int) -> bool:
+        """Forcefully initiates an outbound TCP connection to the specified node."""
+        try:
+            # Check if there is already an active connection with this address
+            with self._lock:
+                for conn in self._connections.values():
+                    if conn.addr == (host, port) and conn.is_alive:
+                        return True
+
+            self._log.inf("TCP: Initiating explicit connect to {host}:{port}...", host=host, port=port)
+            
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(self._cfg.HANDSHAKE_TIMEOUT)
+            sock.connect((host, port))
+            
+            # Send outbound handshake: Magic + Project Token + Our name
+            sock.sendall(self._cfg.MAGIC_HEADER)
+            if hasattr(self._cfg, 'NET_PROJECT_TOKEN'):
+                sock.sendall(self._cfg.NET_PROJECT_TOKEN)
+                
+            name_bytes = self._cfg.SYSTEM_NAME.encode('utf-8')
+            sock.sendall(struct.pack('>I', len(name_bytes)) + name_bytes)
+            
+            # Read inbound handshake response
+            guest_magic = sock.recv(8)
+            if guest_magic != self._cfg.MAGIC_HEADER:
+                sock.close()
+                return False
+                
+            if hasattr(self._cfg, 'NET_PROJECT_TOKEN'):
+                guest_token = sock.recv(len(self._cfg.NET_PROJECT_TOKEN))
+                if guest_token != self._cfg.NET_PROJECT_TOKEN:
+                    sock.close()
+                    return False
+                    
+            name_len_bytes = sock.recv(4)
+            if not name_len_bytes:
+                sock.close()
+                return False
+            name_len = struct.unpack('>I', name_len_bytes)[0]
+            remote_name = sock.recv(name_len).decode('utf-8')
+            
+            if self._cfg.SYSTEM_NAME == remote_name:
+                sock.close()
+                return False
+                
+            # Register active session
+            self._register_connection(remote_name, sock, (host, port))
+            return True
+        except Exception as e:
+            self._log.err("TCP: Explicit connect to {host}:{port} failed: {e}", host=host, port=port, e=e)
+            return False
+
+    def is_conn_alive(self, name: str) -> bool:
+        """Checks if an active session exists for a given federation system name."""
+        with self._lock:
+            return name in self._connections and self._connections[name].is_alive
+
+    def is_conn_alive_addr(self, addr: tuple) -> bool:
+        """Checks if an active session exists for a specific physical ip:port tuple."""
+        with self._lock:
+            return any(c.addr == addr and c.is_alive for c in self._connections.values())

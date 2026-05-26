@@ -46,14 +46,21 @@ class Config():
     UI_LANGUAGE = "en"
 
     # Transport.
-    MAGIC_HEADER = 0x53616E61506F3130
+    MAGIC_HEADER = b"SanaPo10"
     TCP_PORT_DEFAULT = 5000
     UDP_PORT_DEFAULT = 5000
     HANDSHAKE_TIMEOUT = 5.0
-    SYSTEM_NAME = 'SYSTEM_NAME_TEST'
+    SYSTEM_NAME = 'SYSTEM_NAME'
     HOST = '0.0.0.0'
     UDP_BEACON_INTERVAL = 10.0
     CONN_KEEP_ALIVE = 30.0
+    NET_AUTO_CONNECT = True
+    NEEDS_NET_AUTO_CONNECT = True
+    NET_STRICT_HANDSHAKE = True
+
+    # Security V1
+    NET_PROJECT_TOKEN = b"PROJ99" # secret marker
+    NET_ALLOWED_IPS = ["127.0.0.1", "192.168.4.100", "192.168.4.101"] # white list. [] for all
 
     # Broker.
     ADDR_BROKER_STR = "BROKER"
@@ -61,3 +68,4 @@ class Config():
 
     # BootMaster.
     BOOT_UI_MODE = "CUI" # "GUI" or "CUI"
+

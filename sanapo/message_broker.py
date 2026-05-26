@@ -47,7 +47,7 @@ class MessageBroker:
         """Registers a local route using the address already stored in the transport."""
         addr_str = transport.sanapo_addr.unit
         self._local_routes[addr_str] = transport
-        self._log.inf("Broker: Local route registered for {addr}", addr=addr_str)
+        self._log.inf("BROKER: unit {addr} is registred as local", addr=addr_str)
 
     def register_federation_route(self, system_name: str, transport: BaseAdapterTransport):
         """Registers a link to another sanapo instance."""
@@ -67,7 +67,7 @@ class MessageBroker:
             except queue.Empty:
                 break
             except Exception as e:
-                self._log.crt("Broker: Routing failure: {e}", e=e)
+                self._log.crt("BROKER: Routing failure: {e}", e=e)
                 break
         return processed > 0
 
@@ -110,6 +110,23 @@ class MessageBroker:
                 return fed_transport.send(frame)
         
         return False
+    
+    def broadcast_sys_message(self, sys_type: SysType, payload: dict) -> None:
+        """Clones and delivers a system message to all currently registered local units."""
+        for unit_name, transport in self._local_routes.items():
+            if unit_name == self._cfg.ADDR_KERNEL_STR: 
+                continue
+                
+            msg = {
+                "msg_type": "sys",
+                "sub_type": sys_type.value if hasattr(sys_type, 'value') else str(sys_type),
+                "sender": f"{self._cfg.SYSTEM_NAME}:BROKER",
+                "recipient": f"{self._cfg.SYSTEM_NAME}:{unit_name}",
+                "payload": payload
+            }
+            # NATIVE USE: We use the framework's native send() method to push frames safely
+            if hasattr(transport, 'send'):
+                transport.send(msg)
 
     def _handle_system(self, frame: Frame):
         """Manages dynamic event subscriptions."""

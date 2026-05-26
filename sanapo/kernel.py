@@ -22,11 +22,13 @@ from sanapo.protocol import Frame
 from sanapo.tier import Tier
 from sanapo.views import KernelTierView, KernelBootMasterView
 from sanapo.transport.adapters.queue import QueueAdapterTransport
-from sanapo.enums import UnitType, EnumRegistry, ThreadType
+from sanapo.enums import SysType, UnitType, EnumRegistry, ThreadType
+from sanapo.transport.services.udp import UdpBeacon, UdpListener
+from sanapo.transport.services.tcp import TcpService
 
 class Kernel:
     """Central Orchestrator of the sanapo framework."""
-    def __init__(self, enum_reg: EnumRegistry):
+    def __init__(self, enum_reg: EnumRegistry, system_name: str | None = None) -> None:
         # Recipes
         self._recipes_units: dict[Addr, dict] = {}
         self._recipes_threads: dict[str, dict] = {}
@@ -54,19 +56,25 @@ class Kernel:
         # Infrastructure
         self._reg = enum_reg
         self._cfg: Config = Config()
+        if system_name: self._cfg.SYSTEM_NAME = system_name
         self._addr: Addr = Addr(self._cfg.SYSTEM_NAME, self._cfg.ADDR_KERNEL_STR)
+        self._inbox: Queue = Queue()
         self._log: Logger = Logger(self._addr, self._cfg)
         self._translator: Translator = Translator(self._cfg, self._log)
-        self._log.set_translator(self._translator)
-        self._inbox: Queue = Queue()
+        self._log.set_translator(self._translator) 
         self._watchdog: WatchDog = WatchDog(self, self._cfg)
         self._boot_master: BootMaster = BootMaster(KernelBootMasterView(self))
         self._broker: MessageBroker = MessageBroker(self._cfg, self._log, enum_reg)
         self._secr: KernelSecretary = KernelSecretary(self, self._broker)
 
-        # Views
+        self._tcp_service: TcpService | None = None
+        self._udp_beacon: UdpBeacon | None = None
+        self._udp_listener: UdpListener | None = None
+
         self.tier_view = KernelTierView(self)
 
+        kernel_transport = QueueAdapterTransport(self._addr, self._inbox)
+        self._broker.register_local_route(kernel_transport)
         self._cfg.ADDR_KERNEL = self._addr
 
     # --- System Configuration (Registration) ---
@@ -291,7 +299,7 @@ class Kernel:
             return None
         # Logger.
         try:
-            logger = Logger(name, self._cfg, self._translator)
+            logger = Logger(addr, self._cfg, self._translator)
         except (TypeError, ValueError, AttributeError) as e:
             self._log.err("Unit not assembled. Didn't get Logger (Name={n}): {e}", n=name, e=e)
             return None
@@ -476,29 +484,56 @@ class Kernel:
         if self._is_shutdowning: return
         self._log.inf("STOP")
         self._is_shutdowning = True
+        self._stop_network()
         self._boot_master.shutdown()
 
     def start(self) -> None:
         """Starts all managers and initiates tier ignition"""
         self._log.inf("START")
         self._is_running = True
+        self._start_network()
         self._boot_master.ignite()
+
+    def step(self) -> None:
+        """Execute one cycle of the conductor"""
+        start_ts = perf_counter()
+        
+        self._broker.step() # Route messages
+        self._secr._step()  # Process self commands
+        for tier in self._tiers.values(): tier.step() # Tier state machine
+        self._boot_master.step() # Load/Shutdown logic checking 
+        self._watchdog.inspect() # Health check
+        self._sys_consist_check() # Persistence check
+        
+        # CPU relax
+        wait = self._cfg.KERNEL_TCT - (perf_counter() - start_ts)
+        if wait > 0: sleep(wait)
 
     def loop(self) -> None:
         """Main conductor loop"""
         while self._is_running:
-            start_ts = perf_counter()
-            
-            self._broker.step() # Route messages
-            self._secr._step()  # Process self commands
-            for tier in self._tiers.values(): tier.step() # Tier state machine
-            self._boot_master.step() # Load/Shutdown logic checking 
-            self._watchdog.inspect() # Health check
-            self._sys_consist_check() # Persistence check
-            
-            # CPU relax
-            wait = self._cfg.KERNEL_TCT - (perf_counter() - start_ts)
-            if wait > 0: sleep(wait)
+            self.step()
+
+    def _start_network(self) -> None:
+        """Starts the network subsystem components."""
+        self._tcp_service = TcpService(config=self._cfg, broker=self._broker, logger=self._log)
+        self._broker.set_tcp_service(self._tcp_service)
+        self._udp_beacon = UdpBeacon(config=self._cfg, logger=self._log)
+        self._udp_listener = UdpListener(config=self._cfg, logger=self._log, tcp_service=self._tcp_service)
+        self._tcp_service._udp_beacon = self._udp_beacon
+        self._tcp_service.start()
+        self._udp_beacon.start()
+        self._udp_listener.start()
+
+    def _stop_network(self) -> None:
+        """Stops the network subsystem components."""
+        if getattr(self, '_udp_beacon', None): 
+            self._udp_beacon.stop()
+        if getattr(self, '_udp_listener', None): 
+            self._udp_listener._is_running = False
+        if getattr(self, '_tcp_service', None): 
+            self._tcp_service._is_running = False
+            self._tcp_service.disconnect_all()
 
     # --- Consistency (Persistence) ---
 
@@ -674,12 +709,26 @@ class Kernel:
         return Frame.from_dict(data, self._reg, self._broker)
     
     # Callback for KernelSecretary TODO
-    def handle_new_federation(self, remote_sys: str):
-        t = "Federation: System {sys} connected. Ready for unit exchange."
+    def handle_new_federation(self, frame: Frame):
+        """Dispatches roles upon new system interconnection."""
+        remote_sys = frame.payload.get("sys_name") if hasattr(frame, 'payload') else str(frame)
+        
+        t = "Federation: System {sys} connected. Kernel delegating tasks."
         self._log.inf(t, sys=remote_sys)
-    
+        
+        # Delegate routing assembly to the network executor
+        if hasattr(self, '_tcp_service') and self._tcp_service:
+            self._tcp_service.establish_federation(remote_sys)
+            
+        # Trigger the generic broker multicast broadcast to all local units
+        payload = {"sys_name": remote_sys}
+        self._broker.broadcast_sys_message(SysType.NET_CONNECTED, payload)
+
+
     # Callback for KernelSecretary TODO
-    def register_remote_unit(manifest_data):
+    def register_remote_unit(self, frame: Frame):
+        manifest = frame.payload.get("manifest")
+        self._log.dbg("Kernel.register_remote_unit(), manifest={manifest}", manifest=manifest)
         pass
     
     # Callback for WatchDog TODO
