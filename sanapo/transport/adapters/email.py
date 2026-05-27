@@ -78,7 +78,7 @@ class EmailAdapterTransport(BaseAdapterTransport):
         except Exception:
             # If failed, wrap raw text into a generic EVENT Frame
             return Frame(
-                msg_type=MsgType.SYSTEM, # TODO
+                msg_type=MsgType.SYS, # TODO
                 evt_type=SysType.RAW, # TODO
                 sender=self.sanapo_addr, # In real life, we'd use a specific Gateway Addr here
                 payload={"raw_text": raw_data},

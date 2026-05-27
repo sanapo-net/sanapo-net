@@ -84,16 +84,6 @@ class BootMaster:
             self._ui.update_local(percent, text)
 
     def _process_current_tier(self) -> None:
-        """Commands the current tier to start its internal logic"""
-        tier_nums = sorted(self.view.tiers.keys())
-        if 0 <= self.current_tier_idx < len(tier_nums):
-            tier = self.view.tiers[tier_nums[self.current_tier_idx]]
-            if self.mode == MasterMode.BOOTING:
-                tier.start()
-            else:
-                tier.stop()
-
-    def _process_current_tier(self) -> None:
         """
         Commands the current tier to start its internal logic
         using the pre-calculated plan.
@@ -102,7 +92,7 @@ class BootMaster:
             tier_num = self._plan[self.current_tier_idx]
             tier = self.view.tiers.get(tier_num)
             if tier:
-                action = "igniting" if self.mode == MasterMode.BOOTING else "shuting down"
+                action = "starting" if self.mode == MasterMode.BOOTING else "stopping"
                 t = "BOOT: Cascade {act} Tier {name} (Layer {num})"
                 self.view.log.dbg(t, act=action, name=tier.name, num=tier_num)
                 if self.mode == MasterMode.BOOTING:

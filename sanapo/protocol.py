@@ -60,30 +60,6 @@ class Frame:
             if self.rpt_type == RptType.CANT_DO:
                 if self.reason is None:
                     raise MessageInitError(f"Field 'reason' is mandatory for RptType.CANT_DO")
-    
-    def format_by_mask(self, mask: str = "") -> str:
-        """Reads characters from the mask string and returns a formatted details string."""
-        if not mask:
-            return ""
-        sub_type_obj = self.evt_type or self.sys_type or self.cmd_type or self.rpt_type
-        sub_type_str = sub_type_obj.value if sub_type_obj else "unknown"
-        msg_type_str = f"{self.msg_type.value}.{sub_type_str}"
-
-        mapping = {
-            "m": msg_type_str,
-            "f": f"From:{self.sender.unit if self.sender else 'N/A'}",
-            "t": f"To:{self.recipient.unit if self.recipient else 'N/A'}",
-            "p": f"Payload:{self.payload.get('text', 'N/A') if isinstance(self.payload, dict) else 'RAW'}",
-            "d": f"Deadline:{self.deadline}",
-            "e": f"Extension:{self.time_ext_req}",
-            "i": f"ID:{self.cmd_id}",
-            "r": f"Reason:{self.reason.value if self.reason else 'N/A'}",
-        }
-        details = ""
-        for char in mask:
-            if char in mapping:
-                details += "|" + mapping[char]
-        return details
 
     def to_dict(self, deep: bool = False) -> dict:
         """
@@ -179,4 +155,36 @@ class Frame:
             deadline=data.get("deadline"),
             time_ext_req=data.get("time_ext_req")
         )
+
+    def __repr__(self) -> str:
+        # Безопасно определяем подтип (RPT, CMD и т.д.)
+        sub_type_obj = self.evt_type or self.sys_type or self.cmd_type or self.rpt_type
+        
+        # Собираем заголовок (например, RPT.CANT_DO)
+        m_name = getattr(self.msg_type, 'name', str(self.msg_type))
+        s_name = getattr(sub_type_obj, 'name', str(sub_type_obj)) if sub_type_obj else "UNKNOWN"
+        type_prefix = f"{m_name}.{s_name}"
+
+        # Собираем только заполненные аргументы
+        args = []
+        
+        if self.sender is not None:
+            args.append(f"from {self.sender}")
+        if self.recipient is not None:
+            args.append(f"to {self.recipient}")
+        if self.cmd_id is not None:
+            args.append(f"cmd_id={self.cmd_id!r}")
+        if self.deadline is not None:
+            args.append(f"deadline={self.deadline}")
+        if self.time_ext_req is not None:
+            args.append(f"time_ext_req={self.time_ext_req}")
+        if self.reason is not None:
+            reason_str = getattr(self.reason, 'name', str(self.reason))
+            args.append(f"reason={reason_str}")
+            
+        # Payload всегда добавляем в самый конец, независимо от его наполнения
+        args.append(f"payload={self.payload}")
+
+        # Склеиваем всё через запятую с пробелом
+        return f"Frame({type_prefix}: {', '.join(args)})"
 

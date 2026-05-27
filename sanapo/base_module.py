@@ -6,8 +6,8 @@ if TYPE_CHECKING:
     from sanapo.base_unit import UnitModuleView
 
 class BaseModule:
-    def __init__(self, u: UnitModuleView, **params):
-        self._u: UnitModuleView = u
+    def __init__(self, unit_view: UnitModuleView, **params):
+        self.v: UnitModuleView = unit_view
         self._is_running = True
         self._is_paused = False
 
@@ -46,5 +46,5 @@ class BaseModule:
         # self._u.start_timeout = 0.5
         # self._u.stop_timeout = 2
         # self._u.step_timeout = 0.2
-        self._u.started()
+        self.v.started()
         pass

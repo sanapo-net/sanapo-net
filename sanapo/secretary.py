@@ -197,21 +197,22 @@ class Secretary:
         )
 
     def send_rpt(self, recipient: Addr, cmd_id: str, rpt_type: RptType,
-                payload: dict[str, any] = {}, time_ext_req: float = None) -> bool:
-        """Sends a report (reply) to a commander."""
-        # Cleanup if the task is finished
+                payload: dict[str, any] = {}, time_ext_req: float = None,
+                reason: RptReason | None = None) -> bool:
+        """Sends a transaction report back to the commander container loop."""
         if rpt_type in [RptType.DONE, RptType.CANT_DO]:
             self._module_is_busy = False
             self._cmd_in.pop(cmd_id, None)
-            
         return self._safe_send(
                 msg_type=MsgType.RPT,
                 recipient=recipient,
                 rpt_type=rpt_type,
                 cmd_id=cmd_id,
                 payload=payload,
-                time_ext_req=time_ext_req
+                time_ext_req=time_ext_req,
+                reason=reason # Forward the concrete validation reason token
         )
+
         
     def _send_sys(self, sys_type: SysType, payload: dict[str, any]) -> bool:
         """
@@ -231,16 +232,18 @@ class Secretary:
         frame = None
         try:
             frame = Frame(sender=self._addr, **kwargs)
+            print(f"frame={frame}")
             res = True
         except MessageInitError as e:
             m_type = kwargs.get('msg_type')
             sub_type = (kwargs.get('cmd_type') or kwargs.get('rpt_type') or 
                         kwargs.get('sys_type') or kwargs.get('evt_type'))
-            m_name = m_type.name if m_type else "UNKNOWN"
-            s_name = sub_type.name if hasattr(sub_type, 'name') else "UNKNOWN"
-            t = "SECR: Bus Protocol Violation [{m_name}:{s_name}]: {e}"
+            m_name = getattr(m_type, 'name', None) or m_type or "UNKNOWN"
+            s_name = getattr(sub_type, 'name', None) or sub_type or "UNKNOWN"
+            t = f"SECR: Bus Protocol Violation [{m_name}:{s_name}]: {e}"
             self._logger.crt(t, m_name=m_name, s_name=s_name, e=e)
             return
+
         try:
             self._outbox.put(frame, block=False)
             res = True
@@ -316,7 +319,7 @@ class Secretary:
             return False
         if not callable(callback):
             t = "SECR: Not callable! Data:{dt} {frame_str}"
-            self._logger.crt(t, frame, frame_str=frame.format_by_mask("m"), dt=callback)
+            self._logger.crt(t, frame_str=f"frame", dt=callback)
             return False
         args = frame.payload.get("args", tuple())
         self._logger.dbg("SECR: Call {cb} with {args}", cb=callback.__name__, args=args)
@@ -339,7 +342,7 @@ class Secretary:
             return True
         else:
             t = "SECR: Was get evt, but module hasn't subcr {frame_str}"
-            self._logger.err(t, frame, frame_str=frame.format_by_mask("mf"))
+            self._logger.err(t, frame_str=f"frame")
             return False
 
     def _process_command(self, frame: Frame) -> bool:
@@ -362,7 +365,7 @@ class Secretary:
             return self._execute_command(handler, frame)
         else:
             t = "SECR: Command received, but no handler found {frame_str}"
-            self._logger.err(t, frame, frame_str=frame.format_by_mask("mf"))
+            self._logger.err(t, frame_str=f"frame")
             self.send_rpt(frame.sender, frame.cmd_id,
                 RptType.CANT_DO,
                 reason=RptReason.NOT_IMPLEMENTED)
@@ -377,7 +380,7 @@ class Secretary:
         cmd_info = self._cmd_out.get(frame.cmd_id)
         if not cmd_info:
             t = "Get report with unknowed cmd_id {frame_str}"
-            self._logger.err(t, frame, frame_str=frame.format_by_mask("mfi"))
+            self._logger.err(t, frame_str=f"frame")
             return res
 
         if frame.rpt_type == RptType.INTO_WORK:
@@ -464,7 +467,7 @@ class Secretary:
         i = next((index for index, val in enumerate(durs) if dur_ms < val), len(durs))
         speed = f"speed_{i}"
         t = "SECR: Done {speed}: {dur:.1f}ms {frame_str}"
-        self._logger.dbg(t, frame, speed=speed, dur=dur_ms, frame_str=frame.format_by_mask("m"))
+        self._logger.dbg(t, speed=speed, dur=dur_ms, frame_str=f"frame")
     
     def _set_unit(self, unit: BaseUnit) -> bool:
         """

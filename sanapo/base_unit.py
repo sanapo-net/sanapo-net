@@ -205,7 +205,8 @@ class BaseUnit():
         self._deadline = perf_counter() + timeout
 
     def destroy(self) -> bool:
-        self._logger.dbg("UNIT: DESTROY")
+        if self._logger and hasattr(self._logger, 'dbg'):
+            self._logger.dbg("UNIT: DESTROY")
         dont_work = [UnitStat.CREATED, UnitStat.STOPPED, UnitStat.DESTROYED, UnitStat.HALTED]
         if not self._is_destroying:
             self._is_destroying = True

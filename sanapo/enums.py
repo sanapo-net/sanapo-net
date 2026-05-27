@@ -1,5 +1,5 @@
 # sanapo/enums.py
-from enum import Enum, IntEnum, unique
+from enum import Enum, unique
 from dataclasses import dataclass
 from typing import Type
 
@@ -15,19 +15,6 @@ class Logs(str, Enum):
     DBG = "dbg"
 
 # Tier
-@unique
-class ShutdownTier(IntEnum):
-    """
-    Defines the order of service lifecycle.
-    Startup follows ascending order (1 -> 5).
-    Shutdown follows descending order (5 -> 1).
-    """
-    CORE = 1         # Essential system components. Start first, stop last.
-    BASE = 2         # Shared resources and internal services.
-    INTEGRATION = 3  # External connections and drivers.
-    APPLICATION = 4  # Main business logic.
-    EXTENSION = 5    # High-level plugins and UI. Start last, stop first.
-
 class TierTask(Enum):
     NONE = "none"
     STARTING = "starting"
@@ -90,11 +77,12 @@ class RptReason(str, Enum):
     """For CANT_DO and TIME_EXTENSION_REQUEST"""
     OK = "OK"
     # Rejection reasons (CANT_DO)
-    MODULE_BUSY = "MODULE_BUSY"         # Single-threaded module is occupied
-    INVALID_ARGS = "INVALID_ARGS"       # Command payload is corrupted or invalid
-    RESOURCE_LOCKED = "RESOURCE_LOCKED" # Hardware or file is busy
-    INTERNAL_ERROR = "INTERNAL_ERROR"   # Unhandled exception in module
+    MODULE_BUSY = "module_busy"         # Single-threaded module is occupied
+    INVALID_ARGS = "invalid_args"       # Command payload is corrupted or invalid
+    RESOURCE_LOCKED = "resource_locked" # Hardware or file is busy
+    INTERNAL_ERROR = "internal_error"   # Unhandled exception in module
     NOT_IMPLEMENTED = "not_implemented"
+    ANOTHER = "another"
 
 # Unit
 @unique
@@ -179,7 +167,6 @@ class EnumRegistry:
     u_stat: Type[UnitStat]
     t_type: Type[ThreadType]
     t_stat: Type[ThreadStat]
-    tier_stop: Type[ShutdownTier]
 
     # 3. Trasport and sourses
     source: Type[UnitSource]
@@ -204,7 +191,6 @@ class EnumRegistry:
             u_stat=UnitStat,
             t_type=ThreadType,
             t_stat=ThreadStat,
-            tier_stop=ShutdownTier,
             source=UnitSource,
             selection=UnitSelection,
             transp_stat=TranspReadStat,

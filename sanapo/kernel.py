@@ -128,87 +128,76 @@ class Kernel:
         return res
 
     def add_tier(self, layer_num: int | None = None, name: str | None = None) -> Tier | None:
-        """Creates a new logic layer or returns an existing one by index or name."""
         """
-        [some name] - create or find and return tier with name
-        LAST - find and return last tier
-        NEW_CREATE - create new tier (tier.autocreated=True) and return it
-        AUTO_CREATING - create new tier (tier.autocreated=True) if last tier.autocreated=False 
-            or return last tier
-        if name != LAST and layer_num - create or find tier with layer_num, else layer_num+1
-        
-        # 1. Explicit Structure Definition
-        kernel.add_tier(1, "CORE")         # Tier 1: CORE
-        kernel.add_tier(2, "DRIVERS")      # Tier 2: DRIVERS
-
-        # 2. Using Navigation Commands
-        kernel.add_tier(name="LAST")       # Returns DRIVERS (Tier #2)
-        kernel.add_tier(name="NEW_CREATE") # Creates LAYER_3 (Tier #3)
-
-        # 3. Smart Auto-Distribution (Ideal for loops)
-        kernel.add_tier()                  # Creates LAYER_4 (Auto-tier)
-        kernel.add_tier()                  # Returns LAYER_4 (Reuses because it is an Auto-tier)
-        kernel.add_tier(name="NEW_CREATE") # Forces creation of LAYER_5
-
-        # 4. Access by Name during Unit Registration
-        # The unit will be assigned to Tier #2 automatically.
-        kernel.add_unit({"name": "GPS", "tier": "DRIVERS", ...}) 
-
+        name=some_name: create or find and return tier with name
+        name=NEW_CREATE: create new tier (tier.autocreated=True) and return it
+        name=LAST: if last tier exist: find and return last tier, else do like NEW_CREATE
+        name=AUTO_CREATING: if last tier.autocreated=False: do like NEW_CREATE, else do like LAST
+        name=None: do like AUTO_CREATING
+        name != "LAST" and layer_num: create or find tier with layer_num, else layer_num+=1
         """
-        # Try to find existing tier
-        if name and name not in (None, "NEW_CREATE", "AUTO_CREATE", "LAST"):
-            tier = None
+        if not hasattr(self, '_last_tier_num') or self._last_tier_num is None:
+            self._last_tier_num = 0
+
+        # Define all system navigation keywords strictly
+        RESERVED = ("LAST", "NEW_CREATE", "AUTO_CREATING")
+
+        # Update counter if explicit layer_num was injected
+        if layer_num is not None and name != "LAST":
+            self._last_tier_num = max(self._last_tier_num, layer_num)
+
+        # 1. Access by explicit custom string name (skip if it is a command)
+        if name and name not in RESERVED:
             if name in self._tiers_by_name:
                 tier = self._tiers_by_name[name]
-            if not tier and layer_num:
-                tier = self._tiers.get(layer_num)
-            if tier:
-                self._log.inf("Tier '{name}' (num={n}) reused.", name=name, n=tier.layer_num)
-                if name and layer_num and (name != tier.name or layer_num != tier.layer_num):
-                    t = "Detected add_tier with wrong pair name+num! name={name} num={num})"
-                    self._log.crt(t, name=name, num=layer_num)
-                    t = "Details: returned tier name={name} num={num}"
-                    self._log.dbg(t, name=tier.name, num=tier.layer_num)
+                self._log.inf("Tier '{name}' reused by name.", name=name)
                 return tier
 
-        # Difine flag 'autocreated'
-        is_auto = name in (None, "NEW_CREATE", "AUTO_CREATE")
-        
-        # Difine layer_num
-        if name == "LAST":
-            layer_num = self._last_tier_num
-            if layer_num != None:
-                self._log.wrn("Detected add_tier with LAST and layer_num! num={n}", n=layer_num)
-        elif layer_num is None:
-            last_tier = self._tiers.get(self._last_tier_num)
-            if is_auto and last_tier and last_tier.autocreated and name != "NEW_CREATE":
-                layer_num = self._last_tier_num
-            else:
-                self._last_tier_num += 1
-                layer_num = self._last_tier_num
-        
-        # Name + Logger
-        if name in (None, "NEW_CREATE", "AUTO_CREATE"):
-            name = f"LAYER_{layer_num}"
-        
+        # Internal helpers mapping the docstring state-machine matrix
+        def do_last():
+            if self._tiers:
+                max_num = max(self._tiers.keys())
+                return self._tiers[max_num]
+            return do_new_create()
 
-        # Tier creating
-        try:
-            logger = Logger(f"TIER_{name}", self._cfg, self._translator)
-            tier = Tier(self.tier_view, logger, layer_num, name, is_auto)
-            
-            # Registy
-            self._tiers[tier.layer_num] = tier
-            self._tiers_by_name[tier.name] = tier
-            
-            # Save recipe
-            self._recipes_tiers[layer_num] = {"layer_num": layer_num, "name": name, "auto": is_auto}
-            
-            self._log.inf("Tier {name} ({num}) created", name=tier.name, num=tier.layer_num)
-            return tier
-        except Exception as e:
-            self._log.crt("Tier creation failed: {e}", e=e)
-            return None
+        def do_new_create():
+            self._last_tier_num += 1
+            return build_and_register(self._last_tier_num, f"LAYER_{self._last_tier_num}", True)
+
+        def do_auto_creating():
+            if self._tiers:
+                max_num = max(self._tiers.keys())
+                last_t = self._tiers[max_num]
+                if getattr(last_t, 'autocreated', False) is False:
+                    return do_new_create()
+                return do_last()
+            return do_new_create()
+
+        def build_and_register(num: int, t_name: str, auto_flag: bool):
+            logger = Logger(f"TIER_{t_name}", self._cfg, self._translator)
+            new_tier = Tier(self.tier_view, logger, num, t_name, auto_flag)
+            self._tiers[num] = new_tier
+            self._tiers_by_name[t_name] = new_tier
+            self._recipes_tiers[num] = {"layer_num": num, "name": t_name, "auto": auto_flag}
+            self._log.inf("Tier {name} ({num}) created", name=t_name, num=num)
+            return new_tier
+
+        # 2. Evaluate Navigation Commands matrix
+        if name == "LAST":
+            return do_last()
+        if name == "NEW_CREATE":
+            return do_new_create()
+        if name in (None, "AUTO_CREATING"):
+            return do_auto_creating()
+
+        # 3. Handle explicit layer_num assignment fallback
+        if layer_num is not None:
+            if layer_num in self._tiers:
+                return self._tiers[layer_num]
+            t_name = name if name else f"LAYER_{layer_num}"
+            return build_and_register(layer_num, t_name, False)
+
+        return None
 
     def add_tiers(self, configs: list[dict[str, any]]) -> dict[Tier]:
         res = {}
@@ -246,7 +235,7 @@ class Kernel:
                     t = "Created automatically nonexistent thread {thread_name} for unit {u_name}"
                     self._log.inf(t, u_name=addr.unit, thread_name=thread_name)
                 else:
-                    delleting = self._destrioy_unit(unit)
+                    delleting = self._destroy_unit(unit)
                     t = "Unit {u} is created, but thread {t} is not auto-created. Unit del:{d}"
                     self._log.crt(t, u=addr.unit, t=thread_name, d=delleting)
                     return False
@@ -255,12 +244,13 @@ class Kernel:
             # Tier distribution
             tier = self._tiers.get(tier_layer) or self._tiers_by_name.get(tier_name)
             if tier is None:
-                tier = self.add_tier(tier_layer, thread_name)
+                # Direct the exact inputs straight into your smart add_tier factory
+                tier = self.add_tier(tier_layer, tier_name)
                 if tier:
                     t = "Created automatically nonexistent tier {t} for unit {u}"
-                    self._log.inf(t, u=addr.unit, t=f"{tier_name}|{tier_layer}")
+                    self._log.inf(t, u=addr.unit, t=f"{tier.name}|{tier.layer_num}")
                 else:
-                    delleting = self._destrioy_unit(unit)
+                    delleting = self._destroy_unit(unit)
                     t = "Unit {u} is created, but tier {t} is not auto-created. Unit del:{d}"
                     self._log.crt(t, u=addr.unit, t=f"{tier_name}|{tier_layer}", d=delleting)
                     return False
@@ -364,12 +354,13 @@ class Kernel:
         secr._set_unit(unit)
         return unit
 
-    def _destrioy_unit(self, unit: BaseUnit) -> None:
+    def _destroy_unit(self, unit: BaseUnit) -> None:
         name = unit.addr.unit
+        addr = unit.addr
         destroyed = unit.destroy()
         if not destroyed:
             self._log.wrn("Destroy Unit {n} without waiting", n=name)
-        self._broker.deregister_addr(unit)
+        self._broker.deregister_addr(addr)
 
     def rebuild_unit(self, unit: BaseUnit):
         """Destroys and recreates a unit from its recipe"""
@@ -410,7 +401,7 @@ class Kernel:
                 tier._units.remove(unit)
 
         # 5. Final cleanup in Kernel and Broker
-        self._destrioy_unit(unit) # Calls unit.destroy() and broker.deregister_addr
+        self._destroy_unit(unit) # Calls unit.destroy() and broker.deregister_addr
         self._units.pop(target_addr, None)
         self._recipes_units.pop(target_addr, None)
 

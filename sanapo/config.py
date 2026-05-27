@@ -15,12 +15,13 @@ class Config():
     DEFAULT_LOG_FLAGS = {
         "console": [Logs.CRT, Logs.ERR, Logs.WRN, Logs.INF, Logs.DBG],
         "file": [Logs.CRT, Logs.ERR, Logs.WRN, Logs.INF, Logs.DBG],
+        # TODO del message logging system
         "message": [Logs.CRT, Logs.ERR, Logs.WRN, Logs.INF, Logs.DBG],
     }
 
     # Secretary.
     DEFAULT_CMD_DEADLINE_ANSW = 0.2    # seconds
-    DEFAULT_CMD_DEADLINE_DONE = 0.8     # seconds
+    DEFAULT_CMD_DEADLINE_DONE = 0.5     # seconds
     DEFAULT_TIME_EXTENSION = 0.5        # seconds
     DEADLINE_EXTENSION_THRESHOLD = 0.3  # seconds
     UNIT_BUS_READ_LIMIT = 20
