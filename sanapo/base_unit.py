@@ -13,13 +13,14 @@ if TYPE_CHECKING:
     from sanapo.manifest import Manifest
     from sanapo.addr import Addr
     from sanapo.protocol import Frame
+    from sanapo.message_broker import MessageBroker
 
 class BaseUnit():
     def __init__(self,
             config: Config,
             addr: Addr,
             type: UnitType,
-            addr_by_str: callable,
+            broker: MessageBroker,
             module_class: any,
             module_params: dict[str, any],
             logger: Logger,
@@ -28,6 +29,7 @@ class BaseUnit():
         self._config: Config = config
         self._logger: Logger = logger
         self._secr: Secretary = secr
+        self._broker: MessageBroker = broker
         self.addr: Addr = addr
         self.type: UnitType = type
         self.manifest: Manifest = None # Kernel make it
@@ -40,7 +42,7 @@ class BaseUnit():
 
         self._is_destroying: bool = False
         self._needs_rebirth: bool = False
-        self._needs_start: bool = False
+        self._module_needs_start: bool = False
         self._needs_stop: bool = False
 
         self._deadline: float | None = None
@@ -68,8 +70,14 @@ class BaseUnit():
                 UnitType.TICKABLE: [1,0],
             }
         }
-        self.addr_by_str: callable = addr_by_str
-        self.create_module()       
+        self.addr_by_str: callable = self._broker.get_addr
+        self.create_module()
+
+    def __repr__(self) -> str:
+        cls_name = self._module_class.__name__
+        obj_id = f"0x{id(self):X}"
+        t = f"<BaseUnit: addr={self.addr} type={self.type.name} module={cls_name} id={obj_id}>"
+        return t
 
     def create_module(self) -> bool:
         """
@@ -127,18 +135,26 @@ class BaseUnit():
             return False
         
         if self.stat == UnitStat.STARTING:
-            if self._needs_start:
+            if self._module_needs_start:
                 self._logger.dbg("UNIT: module.start()")
                 res = self._module.start()
-                self._needs_start = False
-                if res:
+                self._module_needs_start = False
+                
+                # Check if the module explicitly signaled a hard boot crash execution fault
+                if res is False:
+                    self._deadline = None
+                    self.stat = UnitStat.HALTED
+                    self._logger.wrn("UNIT: module.start() failed. Marking as HALTED.")
+                    return False
+                else:
                     self.started()
                     return True
             elif self._deadline and now >= self._deadline:
-                self.started()
                 self._deadline = None
-                self._logger.wrn("UNIT: STARTED. Forced by timeout")
+                self.stat = UnitStat.HALTED
+                self._logger.err("UNIT: Boot timeout breached. Marking as HALTED.")
                 return False
+
 
         if self.stat == UnitStat.STOPPING:
             if self._needs_stop:
@@ -178,7 +194,7 @@ class BaseUnit():
             return
         self._logger.dbg("UNIT: START")
         self.stat = UnitStat.STARTING
-        self._needs_start = True
+        self._module_needs_start = True
         timeout = timeout if timeout else self.start_timeout
         self._deadline = perf_counter() + timeout
     
@@ -201,7 +217,7 @@ class BaseUnit():
         self._logger.dbg("UNIT: STOP")
         self.stat = UnitStat.STOPPING
         self._needs_stop = True
-        timeout = timeout if timeout else self.stop_timeout
+        timeout = timeout or self.stop_timeout
         self._deadline = perf_counter() + timeout
 
     def destroy(self) -> bool:
@@ -241,7 +257,9 @@ class BaseUnit():
             self._logger.dbg(t, new_type=new_type)
             return True
         
-    def _validate_and_set_timeouts(self, start_val: float | None = None, stop_val: float | None = None) -> None:
+    def _validate_and_set_timeouts(self,
+                start_val: float | None = None,
+                stop_val: float | None = None) -> None:
         """Atomic timeout validator with race-condition prevention."""
         # Calculate safety margin
         min_allowed = max(self.step_timeout, self._config.THREAD_TCT_DEFAULT) * 1.5
@@ -250,7 +268,7 @@ class BaseUnit():
         target_start = start_val if start_val is not None else self.start_timeout
         if target_start < min_allowed:
             if start_val is not None:
-                t = "Timeout protection: requested start_timeout {old}s is too low. Raised to {min_allowed}s."
+                t = "Timeout protection: start_timeout {old}s is too low. Raised to {min_allowed}s."
                 self._logger.wrn(t, old=start_val, min_allowed=min_allowed)
             target_start = min_allowed
             
@@ -302,7 +320,6 @@ class UnitModuleView:
         self.started: callable = unit.started # Switch to WORKING
         self.sleep: callable = unit.sleep     # Switch to SLEEPING
         self.wakeup: callable = unit.wakeup   # Switch to WORKING
-        self.addr_by_str: callable = unit.addr_by_str
 
     # --- Read-only Properties ---
     @property
@@ -347,3 +364,51 @@ class UnitModuleView:
     def step_timeout(self, value: float) -> None:
         """Adjusts the single step processing timeout execution loop."""
         self._unit.step_timeout = value
+
+    # --- Methods ---
+    def addr_by_str(self, addr_str: str) -> BaseUnit | None:
+        return self._unit.addr_by_str(addr_str, create=False, find=True)
+
+    def get_active_systems(self) -> list[str]:
+        """Returns a list of all currently connected remote system names."""
+        broker = self._unit._broker
+        if hasattr(broker, '_federation_routes'):
+            return list(broker._federation_routes.keys())
+        return []
+
+    def get_remote_units(self, system_name: str) -> list[str]:
+        """Returns a list of all registered public unit names of a specific remote node."""
+        broker = self._unit._broker
+        prefix = f"{system_name}:"
+        with broker._addr_lock:
+            # Filters the local address book and returns only the unit names
+            return [
+                k.split(":", 1)[1] 
+                for k in broker._addr_book.keys() 
+                if k.startswith(prefix)
+            ]
+        
+    def find_remote_units_by_role(self, role: str) -> list[Addr]:
+        """Finds logic addresses of all remote units matching a specific role string."""
+        broker = self._unit._broker
+        found_addresses = []
+        with broker._addr_lock:
+            for addr_str, m_dict in broker._remote_manifests.items():
+                # Direct string comparison bypasses any registry or enum mismatch issues
+                if m_dict.get("role") == role:
+                    addr_obj = broker.get_addr(addr_str, create=False, find=True)
+                    if addr_obj:
+                        found_addresses.append(addr_obj)
+        return found_addresses
+
+    def find_remote_units_by_tag(self, tag: str) -> list[Addr]:
+        """Finds logic addresses of all remote units possessing a specific tag string."""
+        broker = self._unit._broker
+        found_addresses = []
+        with broker._addr_lock:
+            for addr_str, m_dict in broker._remote_manifests.items():
+                if tag in m_dict.get("tags", []):
+                    addr_obj = broker.get_addr(addr_str, create=False, find=True)
+                    if addr_obj:
+                        found_addresses.append(addr_obj)
+        return found_addresses

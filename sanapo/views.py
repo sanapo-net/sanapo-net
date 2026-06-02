@@ -1,6 +1,6 @@
 # sanapo/views.py
 from __future__ import annotations
-from typing import TYPE_CHECKING, Callable, List, Dict, Any, Optional, Union
+from typing import TYPE_CHECKING, Callable, Union
 
 if TYPE_CHECKING:
     from sanapo.kernel import Kernel
@@ -17,7 +17,7 @@ class KernelTierView:
     def __init__(self, kernel: Kernel):
         self.cfg: Config = kernel._cfg
         self.rebuild_unit: Callable[[BaseUnit], None] = kernel.rebuild_unit
-        self.get_manager: Callable[[BaseUnit], ThreadManager] = kernel.get_manager_by_unit
+        self.get_manager: Callable[[Addr], ThreadManager] = kernel.get_manager_by_addr
         self.emit_progress: Callable[[str, int, int], None] = kernel.emit_boot_progress
 
 class KernelBootMasterView:
@@ -33,48 +33,92 @@ class KernelBootMasterView:
 
 class KernelUserView:
     """High-level secure API for project developers to interact with the sanapo Kernel."""
-    def __init__(self, kernel: Kernel):
+
+    def __init__(self, kernel: Kernel) -> None:
         self._kernel = kernel
 
         # Life-Cycle Management
         self.start: Callable[[], None] = kernel.start
         self.stop: Callable[[], None] = kernel.stop
         self.restart: Callable[[], None] = kernel.restart
-        
-        # System Provisioning
-        self.setup: Callable[
-            [Optional[List[Dict[str, Any]]], Optional[List[Dict[str, Any]]], Optional[List[Dict[str, Any]]]], 
-            Dict[str, Dict[str, Any]]
-        ] = kernel.setup
 
-        self.add_unit: Callable[
-            [str, UnitType, Any, Optional[Dict[str, Any]], Optional[Dict[str, Any]], Optional[str], Optional[str], Optional[int]], 
-            Optional[BaseUnit]
-        ] = kernel.add_unit
+    def setup(
+        self,
+        threads: list[dict[str, any]] | None = None,
+        tiers: list[dict[str, any]] | None = None,
+        units: list[dict[str, any]] | None = None
+    ) -> dict[str, dict[str, any]]:
+        """Unified entry for system building"""
+        return self._kernel.setup(threads, tiers, units)
 
-        self.add_units: Callable[[List[Dict[str, Any]]], Dict[str, BaseUnit]] = kernel.add_units
-        
-        self.add_thread: Callable[
-            [str, Optional[ThreadType], Optional[float], Optional[float], Optional[float]], 
-            Optional[ThreadManager]
-        ] = kernel.add_thread
+    def add_unit(
+        self,
+        name: str,
+        type: UnitType,
+        m_class: any,
+        m_params: dict[str, any] | None = None,
+        manifest: dict[str, any] | None = None,
+        thread_name: str | None = None,
+        tier_name: str | None = None,
+        tier_layer: int | None = None
+    ) -> BaseUnit | None:
+        """Add a single unit to the system"""
+        return self._kernel.add_unit(
+            name, type, m_class, m_params, manifest, thread_name, tier_name, tier_layer)
 
-        self.add_threads: Callable[[List[Dict[str, Any]]], Dict[str, ThreadManager]] = kernel.add_threads
-        
-        self.add_tier: Callable[[Optional[int], Optional[str]], Optional[Tier]] = kernel.add_tier
-        self.add_tiers: Callable[[List[Dict[str, Any]]], Dict[str, Tier]] = kernel.add_tiers
+    def add_units(self, configs: list[dict[str, any]]) -> dict[str, BaseUnit]:
+        """Add multiple units to the system"""
+        return self._kernel.add_units(configs)
 
-        # Graceful Removal
-        self.del_unit: Callable[[Union[Addr, str]], bool] = kernel.del_unit
-        self.del_tier: Callable[[Optional[int], Optional[str]], bool] = kernel.del_tier
-        self.del_thread: Callable[[str], bool] = kernel.del_thread
+    def add_thread(
+        self,
+        name: str,
+        type: ThreadType | None = None,
+        tct: float | None = None,
+        tct_hiber: float | None = None,
+        join_margin: float | None = None
+    ) -> ThreadManager | None:
+        """Add a thread manager to the system"""
+        return self._kernel.add_thread(name, type, tct, tct_hiber, join_margin)
 
-        # Internal Tools
-        self.log: Logger = kernel._log
-        self.translate: Callable[..., str] = kernel._log._translator.translate
+    def add_threads(self, configs: list[dict[str, any]]) -> dict[str, ThreadManager]:
+        """Add multiple thread managers to the system"""
+        return self._kernel.add_threads(configs)
+
+    def add_tier(self, layer_num: int | None = None, name: str | None = None) -> Tier | None:
+        """
+        Add a tier to the system with specific layer number and/or name
+        """
+        return self._kernel.add_tier(layer_num, name)
+
+    def add_tiers(self, configs: list[dict[str, any]]) -> dict[str, Tier]:
+        """Add multiple tiers to the system"""
+        return self._kernel.add_tiers(configs)
+
+    def del_unit(self, addr: Union[Addr, str]) -> bool:
+        """Gracefully stops and removes a unit from all registries"""
+        return self._kernel.del_unit(addr)
+
+    def del_tier(self, layer_num: int | None = None, name: str | None = None) -> bool:
+        """Removes a Tier only if it contains no units"""
+        return self._kernel.del_tier(layer_num, name)
+
+    def del_thread(self, name: str) -> bool:
+        """Stops and removes a ThreadManager only if no units are assigned to it"""
+        return self._kernel.del_thread(name)
+
+    # Internal Tools
+    @property
+    def log(self) -> Logger:
+        """Access to the kernel's logger"""
+        return self._kernel._log
+
+    @property
+    def translate(self) -> Callable[..., str]:
+        """Access to translation service"""
+        return self._kernel._log._translator.translate
 
     # Property-based Flags to ensure real-time accuracy
-    
     @property
     def is_running(self) -> bool:
         """True if the system main loop is active."""

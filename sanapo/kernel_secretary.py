@@ -6,7 +6,6 @@ from sanapo.enums import SysType
 
 if TYPE_CHECKING:
     from sanapo.kernel import Kernel
-    from sanapo.protocol import Frame
     from sanapo.message_broker import MessageBroker
 
 class KernelSecretary(Secretary):
@@ -32,7 +31,10 @@ class KernelSecretary(Secretary):
 
     def auto_subscribe(self) -> None:
         self._handlers_sys: dict[SysType, callable] = {
-            SysType.NET_CONNECTED: self._kernel.handle_new_federation,
-            SysType.REG_UNIT: self._kernel.register_remote_unit,
-            SysType.SUB: self._kernel.register_remote_unit,
+            SysType.NET_CONNECTED: self._kernel.on_net_connected,
+            SysType.NET_DISCONNECTED: self._kernel.on_net_disconnected,
+            SysType.NET_MANIFEST_RECEIVED: self._kernel.on_net_manifest_received,
+            SysType.SUB: lambda frame: True,
+            SysType.UNSUB: lambda frame: True,
+            SysType.SUB_SETUP: lambda frame: True,
         }

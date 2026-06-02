@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from sanapo.config import Config
     from sanapo.translator import Translator
 
+# TODO del param frame support
 class Logger:
     _print_lock = threading.Lock()
     def __init__(self,

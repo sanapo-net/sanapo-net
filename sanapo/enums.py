@@ -58,7 +58,7 @@ class SysType(str, Enum):
     RAW = "raw"
     NET_CONNECTED = "net_connected"
     NET_DISCONNECTED = "net_disconnected"
-    REG_UNIT = "reg_unit"
+    NET_MANIFEST_RECEIVED = "net_manifest_received"
 
 @unique
 class RptType(str, Enum):
@@ -90,7 +90,7 @@ class UnitType(str, Enum):
     UTILITY = "utility"   # Without loop, without Secretery:  mod + log
     SIGMA = "sigma"       # With loop, without Secretery:  mod_step + log
     ZOMBIE = "zombie"     # Controlled by Secretery (via callbacks):  mod + secr_step + log
-    TICKABLE = "tickable" # Without loop, Secretery has loop, calls step():  mod_step + secr_step + log
+    TICKABLE = "tickable" # Without loop, Secretery has loop, calls step():  (mod + secr)_step + log
 
 @unique
 class UnitStat(str, Enum):
@@ -138,7 +138,7 @@ class UnitSelection(Enum): # WHOM TO TAKE (Object state filter)
 class ExecutionStrategy(Enum): # WHOM TO START (Post-creation action)
     NONE = "none"      # Create objects but do not call .start()
     ALL = "all"        # Start all selected units
-    WORKING = "sync"   # Start only those that were running before the reload
+    WORKING = "working"# Start only those that were running before the reload
 
 # Translator
 @unique

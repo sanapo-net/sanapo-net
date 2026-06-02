@@ -17,6 +17,9 @@ class Addr:
 
     def __str__(self):
         return f"{self.system}:{self.unit}"
+    
+    def __repr__(self):
+        return f"Addr({self.system}:{self.unit})"
 
     @classmethod
     def from_str(cls, addr_str: str) -> 'Addr' | None:

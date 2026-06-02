@@ -33,8 +33,7 @@ class WatchDog:
                 # We give the manager a command to recheck their timeouts
                 # (in case the user raised them).
                 manager._update_step_timeout()
-            
-                
+
             # Final check.
             if delay > manager.step_timeout:
                 self.kernel.on_thread_stuck(manager, delay)
@@ -44,4 +43,4 @@ class WatchDog:
                     if unit.stat == UnitStat.WORKING:
                         u_delay = now - unit._last_step
                         if u_delay > unit.step_timeout:
-                            self.kernel.on_unit_stuck(unit, u_delay, manager)
+                            manager.reborn_module(unit)

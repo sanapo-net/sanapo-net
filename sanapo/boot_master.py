@@ -69,9 +69,11 @@ class BootMaster:
         if current_tier.task == TierTask.NONE:
             if current_tier.last_result_ok:
                 if self.mode == MasterMode.BOOTING:
-                    self.view.log.inf("BOOT: Tier {name} UP successful", name=current_tier.name)
+                    t = "BOOT: Tier {name} UP successful"
+                    self.view.log.inf(t, name=current_tier.name)
                 if self.mode == MasterMode.SHUTDOWN:
-                    self.view.log.inf("BOOT: Shutdown: Tier {name} DOWN successful",name=current_tier.name)
+                    t = "BOOT: Shutdown: Tier {name} DOWN successful"
+                    self.view.log.inf(t,name=current_tier.name)
                 self._next_step()
             else:
                 self._handle_failure(current_tier)

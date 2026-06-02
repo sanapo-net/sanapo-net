@@ -14,10 +14,11 @@ if TYPE_CHECKING:
     from sanapo.enums import EnumRegistry
     from sanapo.transport.adapters import BaseAdapterTransport
     from sanapo.transport.services.tcp import TcpService
+    from sanapo.manifest import Manifest
 
 class MessageBroker:
     """
-    Core Router of sanapo framework. 
+    Core Router of sanapo framework.
     Manages local deliveries, event subscriptions, and federated system bridges.
     """
     def __init__(self, config: Config, logger: Logger, enum_reg: EnumRegistry):
@@ -32,6 +33,8 @@ class MessageBroker:
         self._local_routes: dict[str, BaseAdapterTransport] = {}
         self._federation_routes: dict[str, BaseAdapterTransport] = {}
         self._addr_book: dict[str, Addr] = {}
+        self._local_manifests: dict[str, Manifest] = {}
+        self._remote_manifests: dict[str, dict] = {}
         
         # Subscription registry: {EventEnum: {set of Subscriber Addresses}}
         self._subscribers: dict[any, set[Addr]] = {}
@@ -164,36 +167,25 @@ class MessageBroker:
                 payload={"text": f"Target {frame.recipient} unreachable"}
             )
             self._deliver(report, frame.sender)
-
-    def _normalize_str(self, addr_str: str) -> str:
-        """Helper to ensure the address always has a system prefix."""
-        if not addr_str: return ""
-        return addr_str if ":" in addr_str else f"{self._cfg.SYSTEM_NAME}:{addr_str}"
-
-    def find_addr(self, addr_str: str) -> Addr | None:
-        """Only looks up existing addresses in the registry."""
-        full_str = self._normalize_str(addr_str)
-        if not full_str: return None
-        with self._addr_lock:
-            return self._addr_book.get(full_str)
-
-    def ensure_addr(self, addr_str: str) -> Addr | None:
-        """Returns an existing Addr or creates a new one if not found."""
-        full_str = self._normalize_str(addr_str)
-        if not full_str: return None
-        with self._addr_lock:
-            if full_str not in self._addr_book:
-                temp = Addr.from_str(full_str)
-                self._addr_book[full_str] = Addr(temp.system, temp.unit)
-            return self._addr_book[full_str]
-
-    def create_addr(self, addr_str: str) -> Addr | None:
-        """Attempts to register a NEW unique address."""
-        full_str = self._normalize_str(addr_str)
+    
+    def get_addr(self, addr_str: str, create: bool, find: bool):
+        if ":" in addr_str:
+            full_str = addr_str
+        else:
+            full_str = f"{self._cfg.SYSTEM_NAME}:{addr_str}"
         with self._addr_lock:
             if full_str in self._addr_book:
-                return None
-        return self.ensure_addr(full_str)
+                if find:
+                    return self._addr_book[full_str]
+                else:
+                    return None
+            else:
+                if create:
+                    system_name, unit_name = full_str.split(':')
+                    self._addr_book[full_str] = Addr(system_name, unit_name)
+                    return self._addr_book[full_str]
+                else:
+                    return None
 
     def deregister_addr(self, addr: Addr) -> bool:
         """Removes an address reference from the internal cache book."""
@@ -201,3 +193,22 @@ class MessageBroker:
         with self._addr_lock:
             del_addr = self._addr_book.pop(cache_key, None)
         return del_addr is not None
+    
+    def add_local_manifest(self, unit_name: str, manifest: any) -> None:
+        """Registers a local unit's passport in the broker registry."""
+        self._local_manifests[unit_name] = manifest
+
+    def remove_local_manifest(self, unit_name: str) -> None:
+        """Removes a local unit's passport from the broker registry."""
+        self._local_manifests.pop(unit_name, None)
+
+    def get_public_manifests_dict(self) -> dict[str, dict]:
+        """Compiles a dictionary of all local public unit manifests."""
+        public_maps = {}
+        for u_name, manifest in self._local_manifests.items():
+            if manifest and getattr(manifest, 'is_public', False):
+                # Using standard string address notation as the network key layout
+                addr_str = f"{self._cfg.SYSTEM_NAME}:{u_name}"
+                public_maps[addr_str] = manifest.to_dict()
+        return public_maps
+

@@ -4,7 +4,7 @@ from time import perf_counter
 from queue import Empty
 from typing import TYPE_CHECKING
 
-from sanapo.enums import MsgType, SysType, RptType, RptReason, MessageInitError, EnumRegistry
+from sanapo.enums import MsgType, SysType, RptType, RptReason, MessageInitError
 from sanapo.protocol import Frame
 from sanapo.base_unit import BaseUnit
 from sanapo.addr import Addr
@@ -15,7 +15,6 @@ if TYPE_CHECKING:
     from queue import Queue
     from sanapo.config import Config
     from sanapo.logger import Logger
-    from sanapo.message_broker import MessageBroker
     EvtType = Enum
     CmdType = Enum
     EvtTypeClass = Type[Enum]
@@ -59,7 +58,7 @@ class Secretary:
         self._resurrect: callable = resurrect_func
         
         # Performance & Concurrency config.
-        self._has_thread_pool: bool = False       # Set to True by module if it uses own threads
+        self._has_thread_pool: bool = False       # set to True by module if it uses own threads
         self._module_is_busy: bool = False        # Internal flag for single-threaded modules
         self._log_task_duration_mode: bool = True # Toggle for health monitoring logs
         self._multi_reading : bool = False        # Flag of inbox multireading
@@ -232,7 +231,6 @@ class Secretary:
         frame = None
         try:
             frame = Frame(sender=self._addr, **kwargs)
-            print(f"frame={frame}")
             res = True
         except MessageInitError as e:
             m_type = kwargs.get('msg_type')
@@ -278,7 +276,7 @@ class Secretary:
         # Lazy reconstruction of Frame from network dict using singleton addresses from Broker
         if isinstance(incoming, dict):
             try:
-                # Get Frame from Dict
+                # Get Frame from dict
                 frame = self._resurrect(incoming)
             except Exception as e:
                 self._logger.err("[Secr]: Failed to resurrect frame: {e}", e=e)

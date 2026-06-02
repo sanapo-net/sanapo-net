@@ -80,26 +80,35 @@ class UdpListener(threading.Thread):
 
     def _process_beacon(self, data: bytes, addr: tuple):
         """Parses incoming beacon and initiates TCP connection if new."""
+        if not getattr(self._cfg, 'NET_AUTO_CONNECT', True):
+            return
         try:
-            # On/Off NET_AUTO_CONNECT cheking
-            if not getattr(self._cfg, 'NET_AUTO_CONNECT', True):
+            if len(data) < 16: 
                 return
-            # First check if it's even worth unpacking (header size)
-            if len(data) < 16: return
             
-            # Unpack magic first
             magic = struct.unpack('>8s', data[:8])[0]
-            if magic != self._cfg.MAGIC_HEADER: return
+            if magic != self._cfg.MAGIC_HEADER: 
+                return
 
-            # Unpack the rest
             _, port, name_len = struct.unpack('>8sII', data[:16])
             remote_name = data[16:16+name_len].decode('utf-8')
 
-            # Don't connect to ourselves
-            if remote_name == self._cfg.SYSTEM_NAME: return
+            if remote_name == self._cfg.SYSTEM_NAME: 
+                return
 
-            # If it's a new system - tell TCP Service to go visit it!
-            self._tcp_service.connect_to(addr[0], port)
+            if self._tcp_service.is_conn_alive(remote_name):
+                return
+
+            # HARD CORE LOCALHOST PAD: Extract current physical interface IP interface card
+            target_ip = addr[0]
+            my_local_ip = socket.gethostbyname(socket.gethostname())
+            
+            # If the beacon came from our own machine network card, force loopback interface
+            if target_ip == my_local_ip or target_ip == "0.0.0.0":
+                target_ip = "127.0.0.1"
+
+            # Instruct the framework service to connect via secure loopback routing
+            self._tcp_service.connect_to(target_ip, port)
             
         except Exception:
-            pass # Ignore malformed beacons
+            pass

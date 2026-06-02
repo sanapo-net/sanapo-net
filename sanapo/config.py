@@ -51,13 +51,19 @@ class Config():
     TCP_PORT_DEFAULT = 5000
     UDP_PORT_DEFAULT = 5000
     HANDSHAKE_TIMEOUT = 5.0
-    SYSTEM_NAME = 'SYSTEM_NAME'
+    SYSTEM_NAME = 'SANAPO_FW'
     HOST = '0.0.0.0'
     UDP_BEACON_INTERVAL = 10.0
     CONN_KEEP_ALIVE = 30.0
     NET_AUTO_CONNECT = True
     NEEDS_NET_AUTO_CONNECT = True
     NET_STRICT_HANDSHAKE = True
+
+    # Network Security and Cross-Platform Federation
+    # If True, bypass NET_PROJECT_TOKEN verification if password matches
+    NET_ALLOW_CROSS_DISTRIB: bool = False
+    # Secret phrase used for cryptographic HMAC handshake
+    NET_PASSWORD: str = "DEFAULT_SANAPO_PASS"
 
     # Security V1
     NET_PROJECT_TOKEN = b"PROJ99" # secret marker

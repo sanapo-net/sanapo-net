@@ -1,6 +1,5 @@
 # sanapo/kernel.py
 from __future__ import annotations
-import uuid
 import os
 import json
 from queue import Queue
@@ -22,7 +21,8 @@ from sanapo.protocol import Frame
 from sanapo.tier import Tier
 from sanapo.views import KernelTierView, KernelBootMasterView
 from sanapo.transport.adapters.queue import QueueAdapterTransport
-from sanapo.enums import SysType, UnitType, EnumRegistry, ThreadType
+from sanapo.enums import SysType, UnitType, EnumRegistry, ThreadType, MasterMode
+from sanapo.enums import UnitSource, UnitSelection, ExecutionStrategy
 from sanapo.transport.services.udp import UdpBeacon, UdpListener
 from sanapo.transport.services.tcp import TcpService
 
@@ -261,6 +261,7 @@ class Kernel:
             self._broker.register_local_route(transport)
 
             self._units[addr] = unit
+            self._broker.add_local_manifest(name, unit.manifest)
             self._recipes_units[addr] = filtered_params
             return unit
 
@@ -279,11 +280,12 @@ class Kernel:
             self._sys_consist_changed()
         return res
 
-    def _build_unit(self, cfg: dict) -> BaseUnit | None:
+    def _build_unit(self, cfg: dict, rebuilding: bool = False) -> BaseUnit | None:
         """Unit factory: from recipe to living object"""
         name = cfg["name"]
         # Addr.
-        addr = self._broker.create_addr(name)
+        create = not rebuilding
+        addr = self._broker.get_addr(name, create=create, find=True)
         if not addr:
             self._log.err("Unit not assembled. Didn't get Addr. (Name={n})", n=name)
             return None
@@ -314,7 +316,7 @@ class Kernel:
                 config=self._cfg,
                 addr=addr,
                 type=cfg.get("u_type", UnitType.TICKABLE),
-                addr_by_str=self._broker.ensure_addr,
+                broker=self._broker,
                 module_class=cfg["m_class"],
                 module_params=cfg.get("m_params", {}),
                 logger=logger,
@@ -327,30 +329,40 @@ class Kernel:
         # Manifest.
         param_mnfst = cfg.get("manifest", {})
         module_mnfst = unit._module.define_manifest() if unit._module else {}
+
         m_data = {
             "version": "1.0.0",
             "role": "default",
             "is_public": False,
             "is_persistent": True,
-            **module_mnfst, 
+            **module_mnfst,
             **param_mnfst
         }
+
+        tags = set()
+        if "tags" in module_mnfst:
+            tags.update(module_mnfst["tags"])
+        if "tags" in param_mnfst:
+            tags.update(param_mnfst["tags"])
+
         try:
             unit.manifest = Manifest(
-                uid=str(uuid.uuid4()),
-                sid=self._cfg.SYSTEM_NAME,
                 addr=addr,
                 version=m_data["version"],
                 role=m_data["role"],
                 is_public=m_data["is_public"],
                 is_persistent=m_data["is_persistent"],
-                tags=set(module_mnfst.get("tags", [])) | set(param_mnfst.get("tags", []))
+                tags=tags
             )
         except (TypeError, ValueError, AttributeError) as e:
-            self._log.err("Unit not assembled. Didn't get Manifest (Name={n}): {e}", n=name, e=e)
-            t = "Details: param_m={p}, module_m={m} final_m={f}"
+            self._log.err(
+                "Unit not assembled. Didn't get Manifest (Name={n}): {e}",
+                n=name, e=e
+            )
+            t = "Details: param_m={p}, module_m={m}, final_m={f}"
             self._log.dbg(t, p=param_mnfst, m=module_mnfst, f=m_data)
             return None
+
         secr._set_unit(unit)
         return unit
 
@@ -362,15 +374,23 @@ class Kernel:
             self._log.wrn("Destroy Unit {n} without waiting", n=name)
         self._broker.deregister_addr(addr)
 
-    def rebuild_unit(self, unit: BaseUnit):
+    def rebuild_unit(self, unit: BaseUnit, addr: Addr):
         """Destroys and recreates a unit from its recipe"""
-        addr = unit.addr
+        addr = addr
         recipe = self._recipes_units.get(addr)
-        if not recipe: return
-        unit.destroy()
-        new_unit = self._build_unit(recipe)
+        if not recipe:
+            self._log.wrn("No recipe for unit {name}, rebuild_unit:failed", name=addr.unit)
+            return
+        manager = self.get_manager_by_addr(addr)
+        if manager:
+            manager.destroy_unit(unit)
+        new_unit = self._build_unit(recipe, True)
+        new_unit.addr = addr
         self._units[addr] = new_unit
-        self._log.inf("Unit {name} was rebuiled", name=unit.addr.unit)
+        if manager:
+            manager._units[addr] = new_unit
+            manager._init_units[addr] = new_unit
+        self._log.inf("Unit {name} was rebuiled", name=addr.unit)
     
     # --- Delletions ---
 
@@ -379,33 +399,39 @@ class Kernel:
         Gracefully stops and removes a unit from all registries.
         Returns True if the removal process was initiated, False if not found.
         """
-        # 1. Resolve address using our new 'find_addr'
-        target_addr = self._broker.find_addr(addr) if isinstance(addr, str) else addr
+        if isinstance(addr, str):
+            target_addr = self._broker.get_addr(addr, create=False, find=True)
+        elif isinstance(addr, Addr):
+            target_addr = addr
+        else:
+            self._log.err("del_unit: got wrong addr: {addr}", addr=addr)
+            return
         unit = self._units.get(target_addr)
         
         if not unit:
             self._log.wrn("Removal failed: Unit {a} not found.", a=addr)
             return False
 
-        # 2. Signal the unit to stop (V1: no deadline waiting here)
+        # Signal the unit to stop (V1: no deadline waiting here)
         unit.stop()
 
-        # 3. Remove from Thread Manager
-        manager = self.get_manager_by_unit(unit)
+        # Remove from Thread Manager
+        manager = self.get_manager_by_addr(addr)
         if manager:
             manager.remove_unit(str(target_addr.unit))
 
-        # 4. Remove from its Tier
+        # Remove from its Tier
         for tier in self._tiers.values():
             if unit in tier._units:
                 tier._units.remove(unit)
 
-        # 5. Final cleanup in Kernel and Broker
+        # Final cleanup in Kernel and Broker
         self._destroy_unit(unit) # Calls unit.destroy() and broker.deregister_addr
         self._units.pop(target_addr, None)
         self._recipes_units.pop(target_addr, None)
 
         self._log.inf("Unit {n} removed from system.", n=target_addr.unit)
+        self._broker.remove_local_manifest(target_addr.unit)
         self._sys_consist_changed()
         return True
 
@@ -471,12 +497,41 @@ class Kernel:
         self.stop()
 
     def stop(self) -> None:
-        """Starts the shutdown sequence."""
-        if self._is_shutdowning: return
+        """Initiates a graceful, multi-stage architecture shutdown sequence loop."""
+        if self._is_shutdowning: 
+            return
         self._log.inf("STOP")
         self._is_shutdowning = True
-        self._stop_network()
+        
+        # STAGE 1: Mute UDP discovery to prevent new incoming connections and noise
+        if getattr(self, '_udp_beacon', None):
+            self._udp_beacon.stop()
+        if getattr(self, '_udp_listener', None):
+            self._udp_listener._is_running = False
+            if hasattr(self._udp_listener, 'sock') and self._udp_listener.sock:
+                try: self._udp_listener.sock.close()
+                except: pass
+        self._log.dbg("Kernel: UDP Discovery and Beaconing safely terminated.")
+
+        # STAGE 2: Cascade shutdown modules via active BootMaster monitoring loop
         self._boot_master.shutdown()
+        
+        # Drive BootMaster stages with a strict 3.0 seconds safety boundary timeout
+        # This allows intentional emergency isolation bypass tests to clear layout
+        shutdown_start = perf_counter()
+        while self._boot_master.mode == MasterMode.SHUTDOWN:
+            if perf_counter() - shutdown_start > 3.0:
+                self._log.err("Kernel: Shutdown sequence timed out. Forcing exit.")
+                break
+                
+            for tier in self._tiers.values():
+                tier.step()
+            self._boot_master.step()
+            sleep(0.005)
+        
+        # STAGE 3: Final cleanup of the active TCP federation infrastructure
+        self._stop_network()
+        self.on_stopped()
 
     def start(self) -> None:
         """Starts all managers and initiates tier ignition"""
@@ -506,25 +561,48 @@ class Kernel:
             self.step()
 
     def _start_network(self) -> None:
-        """Starts the network subsystem components."""
+        """Starts the network subsystem components with discovery validation."""
         self._tcp_service = TcpService(config=self._cfg, broker=self._broker, logger=self._log)
+        self._tcp_service._kernel = self
         self._broker.set_tcp_service(self._tcp_service)
-        self._udp_beacon = UdpBeacon(config=self._cfg, logger=self._log)
-        self._udp_listener = UdpListener(config=self._cfg, logger=self._log, tcp_service=self._tcp_service)
-        self._tcp_service._udp_beacon = self._udp_beacon
         self._tcp_service.start()
-        self._udp_beacon.start()
-        self._udp_listener.start()
+
+        # Check if the discrete environment requires background discovery beacon loops
+        if getattr(self._cfg, 'NEEDS_NET_AUTO_CONNECT', True):
+            self._udp_beacon = UdpBeacon(config=self._cfg, logger=self._log)
+            self._udp_listener = UdpListener(config=self._cfg, logger=self._log, 
+                                             tcp_service=self._tcp_service)
+            self._tcp_service._udp_beacon = self._udp_beacon
+            
+            self._udp_beacon.start()
+            self._udp_listener.start()
+        else:
+            self._log.inf("Network: Automatic discovery beacon loops DISABLED by configuration.")
 
     def _stop_network(self) -> None:
-        """Stops the network subsystem components."""
-        if getattr(self, '_udp_beacon', None): 
-            self._udp_beacon.stop()
-        if getattr(self, '_udp_listener', None): 
+        """Gracefully disconnects links and forces thread joins to clear RAM footprints."""
+        # 1. Trigger asynchronous stop flags across the network layer layouts
+        if getattr(self, '_udp_beacon', None):
+            self._udp_beacon._is_running = False
+        if getattr(self, '_udp_listener', None):
             self._udp_listener._is_running = False
-        if getattr(self, '_tcp_service', None): 
+        if getattr(self, '_tcp_service', None):
             self._tcp_service._is_running = False
             self._tcp_service.disconnect_all()
+
+        # 2. Sequential Thread Join Block: Give OS enough time to flush threads from memory
+        # We access python threading references safely via the object handles
+        if getattr(self, '_tcp_service', None) and self._tcp_service.is_alive():
+            self._tcp_service.join(timeout=0.2)
+            
+        if getattr(self, '_udp_beacon', None) and self._udp_beacon.is_alive():
+            self._udp_beacon.join(timeout=0.2)
+            
+        if getattr(self, '_udp_listener', None) and self._udp_listener.is_alive():
+            self._udp_listener.join(timeout=0.2)
+            
+        self._log.dbg("All core network service thread contexts joined successfully.")
+
 
     # --- Consistency (Persistence) ---
 
@@ -648,7 +726,6 @@ class Kernel:
             self._log.crt(t, p=module_path, c=class_name, e=e)
             raise e
 
-
     # --- Callbacks ---
 
     # Callback for BootMaster
@@ -681,16 +758,17 @@ class Kernel:
                     self._log.err("User shutdown callback failed: {e}", e=e)
             self._is_running = False
 
-    # Callback for Tier
+    # Callback for Tier TODO
     def emit_boot_progress(self, text: str, ready: int, total: int):
         """Bridge method: Kernel -> BootMaster."""
         self._boot_master.update_sub_progress(text, ready, total)
     
-    # Callback for Tier
-    def get_manager_by_unit(self, unit: BaseUnit) -> ThreadManager:
-        th_name = self._recipes_units[unit.addr].get("thread_name", "DEFAULT")
+    # Callback for Tier (and method for self)
+    def get_manager_by_addr(self, addr: Addr) -> ThreadManager:
+        th_name = self._recipes_units[addr].get("thread_name", "DEFAULT")
         return self._threads[th_name]
     
+
     # Callback for Secretary
     def resurrect_frame(self, data: dict) -> Frame:
         """
@@ -699,40 +777,66 @@ class Kernel:
         """
         return Frame.from_dict(data, self._reg, self._broker)
     
-    # Callback for KernelSecretary TODO
-    def handle_new_federation(self, frame: Frame):
-        """Dispatches roles upon new system interconnection."""
-        remote_sys = frame.payload.get("sys_name") if hasattr(frame, 'payload') else str(frame)
+    def on_net_connected(self, frame: Frame) -> None:
+        remote_system = frame.payload.get("sys_name")
+        self._log.inf("Kernel: Federation link confirmed with node '{s}'. Preparation complete.", s=remote_system)
+        # Custom logic can be added here if the kernel needs to act immediately upon connection
+
+    def on_net_disconnected(self, frame: Frame) -> None:
+        remote_system = frame.payload.get("sys_name")
+        self._log.wrn("Kernel: Federation link with node '{s}' lost. Cleaning up topology.", 
+                      s=remote_system)
         
-        t = "Federation: System {sys} connected. Kernel delegating tasks."
-        self._log.inf(t, sys=remote_sys)
-        
-        # Delegate routing assembly to the network executor
-        if hasattr(self, '_tcp_service') and self._tcp_service:
-            self._tcp_service.establish_federation(remote_sys)
+        # 1. Remove the federation route so the broker stops sending messages to a dead link
+        if remote_system in self._broker._federation_routes:
+            self._broker._federation_routes.pop(remote_system, None)
             
-        # Trigger the generic broker multicast broadcast to all local units
-        payload = {"sys_name": remote_sys}
-        self._broker.broadcast_sys_message(SysType.NET_CONNECTED, payload)
+        # 2. Purge all unit addresses and cached manifests belonging to this system
+        prefix = f"{remote_system}:"
+        with self._broker._addr_lock:
+            # Clear remote routing destinations from address book
+            keys_addr = [k for k in self._broker._addr_book.keys() if k.startswith(prefix)]
+            for k in keys_addr:
+                self._broker._addr_book.pop(k, None)
+                
+            # Clear passport details from service discovery registry to avoid ghosts
+            keys_manifest = [k for k in self._broker._remote_manifests.keys() if k.startswith(prefix)]
+            for k in keys_manifest:
+                self._broker._remote_manifests.pop(k, None)
+                
+        # 3. Notify all local application modules about the disconnect
+        self._broker.broadcast_sys_message(SysType.NET_DISCONNECTED, {"sys_name": remote_system})
 
 
-    # Callback for KernelSecretary TODO
-    def register_remote_unit(self, frame: Frame):
-        manifest = frame.payload.get("manifest")
-        self._log.dbg("Kernel.register_remote_unit(), manifest={manifest}", manifest=manifest)
-        pass
-    
-    # Callback for WatchDog TODO
+    def on_net_manifest_received(self, frame: Frame) -> None:
+        remote_system = frame.payload.get("sys_name")
+        remote_manifests = frame.payload.get("manifests", {})
+        
+        # Save raw manifest dictionaries directly into the broker's cache
+        for addr_str, m_dict in remote_manifests.items():
+            self._broker.get_addr(addr_str, create=True, find=False)
+            self._broker._remote_manifests[addr_str] = m_dict
+            
+        self._log.inf("Kernel: Registered and cached {count} passports from '{sys}'",
+                      count=len(remote_manifests), sys=remote_system)
+
+
+    # Callback for WatchDog: Exposes live active thread pools dict cleanly
     def get_managers(self) -> dict[str, ThreadManager]:
         return self._threads
-    
-    # Callback for WatchDog TODO
+
+    # Callback for WatchDog
     def on_thread_stuck(self, manager: ThreadManager, delay: float):
-        t = "WatchDog: Thread {name} STUCK for {delay:.2f}s!"
-        self._log.crt(t.format(name=manager.name, delay=delay))
-    
-    # Callback for WatchDog TODO
-    def on_unit_stuck(self, unit: BaseUnit, u_delay: float, manager: ThreadManager):
-        t = "WatchDog: Unit {addr} STUCK for {delay:.2f}s in {name}"
-        self._log.wrn(t, addr=unit.addr, delay=u_delay, name=manager.name)
+        """Forcefully terminates and completely recreates a locked OS background thread."""
+        t = "Thread '{name}' STUCK for {delay:.2f}s! Executing NUCLEAR RESET."
+        self._log.crt(t, name=manager.name, delay=delay)
+        success = manager.reload(
+            source=UnitSource.CURRENT,
+            select=UnitSelection.ALIVE,
+            action=ExecutionStrategy.WORKING
+        )
+        if success:
+            self._log.inf("Stalled Thread '{name}' successfully resurrected.", p=manager.name)
+        else:
+            self._log.err("Thread '{name}' reset failed.", name=manager.name)
 

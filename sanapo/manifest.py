@@ -1,3 +1,4 @@
+# sanapo/manifest.py
 from __future__ import annotations
 from dataclasses import dataclass, field, asdict
 from typing import TYPE_CHECKING
@@ -7,27 +8,17 @@ if TYPE_CHECKING:
 
 @dataclass
 class Manifest:
-    """Unit Passport. Defines identity, capabilities, and access levels."""
-    uid: str                 # Unique instance ID (UUID)
-    sid: str                 # System Name (from Config)
-    addr: Addr               # Logic Address object
-    version: str             # Logic/Module version
-    role: str                # Role in system (e.g., 'worker', 'gateway')
+    addr: Addr               # Logical address (e.g., NODE_A:worker_1)
+    version: str             # Module logic version
+    role: str                # System role (e.g., 'worker', 'gateway')
+    tags: set[str] = field(default_factory=set) # set of tags/skills
     
-    # Capabilities (Set of skill tags)
-    tags: set[str] = field(default_factory=set) 
-    
-    # Flags
-    is_public: bool = False      # Share with other systems?
-    is_autonomous: bool = False  # Passive/Slave mode?
-    is_persistent: bool = True   # Save to dump for system consistency?
-    
-    # Security
-    auth_key: str = ""           # Future crypto signatures
+    # Local control flags inside the Kernel
+    is_public: bool = False      # Expose this unit to the public network?
+    is_persistent: bool = True   # Save to a local json dump?
 
     def to_dict(self) -> dict[str, any]:
-        """Serializes manifest to primitive types for network/disk exchange."""
         data = asdict(self)
-        data['addr'] = str(self.addr)  # Convert Addr object to "System:Unit" string
-        data['tags'] = list(self.tags) # Convert set to JSON-serializable list
+        data['addr'] = str(self.addr)
+        data['tags'] = list(self.tags)
         return data
