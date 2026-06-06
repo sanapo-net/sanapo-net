@@ -40,7 +40,6 @@ class BaseUnit():
         
         self.stat: UnitStat = UnitStat.CREATING
 
-        self._is_destroying: bool = False
         self._needs_rebirth: bool = False
         self._module_needs_start: bool = False
         self._needs_stop: bool = False
@@ -88,7 +87,7 @@ class BaseUnit():
             view = UnitModuleView(self)
         except Exception as e:
             self.stat = UnitStat.HALTED
-            self._logger.err("Failed to create UnitModuleView instance: {e}", e=e)
+            self._logger.err("failed to create UnitModuleView instance: {e}", e=e)
             return False
         try:
             # The module accesses everything through a single unit object.
@@ -97,12 +96,12 @@ class BaseUnit():
             return True
         except Exception as e:
             self.stat = UnitStat.HALTED
-            self._logger.err("Failed to create module instance: {e}", e=e)
+            self._logger.err("failed to create module instance: {e}", e=e)
             return False
 
     def restart_module(self, force: bool = False) -> bool:
         """Full restart of the module logic within the existing unit."""
-        self._logger.dbg("UNIT: RESTART:begin (force={force})", force=force)
+        self._logger.dbg("UNIT: restart:begin (force={force})", force=force)
         # Shutting down the old module.
         if self._module:
             try:
@@ -116,27 +115,24 @@ class BaseUnit():
                     self.stat = UnitStat.REBIRTHING 
                     return True
             except Exception as e:
-                self._logger.err("Error during module restarting: {e}", e=e)
+                self._logger.err("error during Module restarting: {e}", e=e)
                 return False
 
         # Create and start new module.
         self.create_module()
         if self.stat == UnitStat.CREATED:
             self.start()
-        self._logger.dbg("UNIT: RESTART:end (force={force})", force=force)
+        self._logger.dbg("UNIT: restart:end (force={force})", force=force)
         return True
     
+    # TODO Check returns
     def step(self) -> bool:
         now = perf_counter()
-
         self._last_step = now
-        if self._is_destroying:
-            self.destroy()
-            return False
-        
+
         if self.stat == UnitStat.STARTING:
             if self._module_needs_start:
-                self._logger.dbg("UNIT: module.start()")
+                self._logger.dbg("UNIT: Module.start()")
                 res = self._module.start()
                 self._module_needs_start = False
                 
@@ -144,7 +140,7 @@ class BaseUnit():
                 if res is False:
                     self._deadline = None
                     self.stat = UnitStat.HALTED
-                    self._logger.wrn("UNIT: module.start() failed. Marking as HALTED.")
+                    self._logger.wrn("UNIT: Module.start() failed. Marking as halted.")
                     return False
                 else:
                     self.started()
@@ -152,24 +148,23 @@ class BaseUnit():
             elif self._deadline and now >= self._deadline:
                 self._deadline = None
                 self.stat = UnitStat.HALTED
-                self._logger.err("UNIT: Boot timeout breached. Marking as HALTED.")
+                self._logger.err("UNIT: Module.start() timeout breached. Marking as halted.")
                 return False
-
 
         if self.stat == UnitStat.STOPPING:
             if self._needs_stop:
-                self._logger.dbg("UNIT: module.stop()")
+                self._logger.dbg("UNIT: Module.stop()")
                 res = self._module.stop()
                 self._needs_stop = False
                 if res is not False:
                     self.stat = UnitStat.STOPPED
                     self._deadline = None
-                    self._logger.dbg("UNIT: STOPPED")
+                    self._logger.dbg("UNIT: stopped")
                     return True
             if self._deadline and now >= self._deadline:
                 self.stat = UnitStat.STOPPED
                 self._deadline = None
-                self._logger.wrn("UNIT: STOPPED. Forced by timeout")
+                self._logger.wrn("UNIT: stopped, forced by timeout")
                 return False
         
         if self.stat == UnitStat.STOPPED:
@@ -179,6 +174,23 @@ class BaseUnit():
                 self.start()
                 return True # Unit is reborned
             return False # Unit is stopped
+        
+        if self.stat == UnitStat.DESTROYING:
+            dont_work = [UnitStat.CREATED, UnitStat.STOPPED, UnitStat.DESTROYED, UnitStat.HALTED]
+            if self.stat not in dont_work:
+                self.stop()
+            if self.stat in dont_work:
+                self.stat = UnitStat.DESTROYED
+                self._module_params = None
+                self._step_map = None
+                self._module = None
+                self.manifest = None
+                self._logger = None 
+                self._secr = None
+                self.addr = None
+                return True
+            else:
+                return False
 
         rules = self._step_map.get(self.stat, {}).get(self.type)
         was_work = False
@@ -192,7 +204,7 @@ class BaseUnit():
     def start(self, timeout: float | None = None) -> None:
         if self.stat in (UnitStat.STARTING, UnitStat.WORKING):
             return
-        self._logger.dbg("UNIT: START")
+        self._logger.dbg("UNIT: start")
         self.stat = UnitStat.STARTING
         self._module_needs_start = True
         timeout = timeout if timeout else self.start_timeout
@@ -200,21 +212,21 @@ class BaseUnit():
     
     def started(self) -> None:
         self._deadline = None
-        self._logger.dbg("UNIT: STARTED")
+        self._logger.dbg("UNIT: started")
         self.stat = UnitStat.WORKING
     
     def sleep(self) -> None:
-        self._logger.dbg("UNIT: SLEEP")
+        self._logger.dbg("UNIT: sleep")
         self.stat = UnitStat.SLEEPING
 
     def wakeup(self) -> None:
-        self._logger.dbg("UNIT: WAKEUP")
+        self._logger.dbg("UNIT: wakeup")
         self.stat = UnitStat.WORKING
 
     def stop(self, timeout: float | None = None) -> None:
         if self.stat in (UnitStat.STOPPING, UnitStat.STOPPED):
             return
-        self._logger.dbg("UNIT: STOP")
+        self._logger.dbg("UNIT: stop")
         self.stat = UnitStat.STOPPING
         self._needs_stop = True
         timeout = timeout or self.stop_timeout
@@ -222,30 +234,15 @@ class BaseUnit():
 
     def destroy(self) -> bool:
         if self._logger and hasattr(self._logger, 'dbg'):
-            self._logger.dbg("UNIT: DESTROY")
-        dont_work = [UnitStat.CREATED, UnitStat.STOPPED, UnitStat.DESTROYED, UnitStat.HALTED]
-        if not self._is_destroying:
-            self._is_destroying = True
-            if self.stat not in dont_work:
-                self.stop()
-        if self.stat in dont_work:
-            self.stat = UnitStat.DESTROYED
-            self._module_params = None
-            self._step_map = None
-            self._module = None
-            self.manifest = None
-            self._logger = None 
-            self._secr = None
-            self.addr = None
-            return True
-        else:
-            return False
+            self._logger.dbg("UNIT: destroy")
+        self.stat = UnitStat.DESTROYING
+
     
     def mutate(self, new_type: UnitType) -> bool:
         """Changes unit type on the fly"""
         self._logger.dbg("UNIT: mutate to {type}", type=new_type)
         if not isinstance(new_type, UnitType):
-            t = "Change UnitType, expected UnitType, got {type}"
+            t = "mutate UnitType: err expected UnitType, got {type}"
             self._logger.err(t, type=type(new_type))
             return False
         if isinstance(self._module, BaseModule):
@@ -253,7 +250,7 @@ class BaseUnit():
             return True
         elif hasattr(self._module, "step") and callable(self._module):
             self.type = new_type
-            t = "Change UnitType to {new_type}, and modile is not BaseModule type"
+            t = "mutate UnitType to {new_type}, and module is not BaseModule type"
             self._logger.dbg(t, new_type=new_type)
             return True
         
@@ -268,7 +265,7 @@ class BaseUnit():
         target_start = start_val if start_val is not None else self.start_timeout
         if target_start < min_allowed:
             if start_val is not None:
-                t = "Timeout protection: start_timeout {old}s is too low. Raised to {min_allowed}s."
+                t = "timeout protection: start_timeout {old}s is too low. Raised to {min_allowed}s."
                 self._logger.wrn(t, old=start_val, min_allowed=min_allowed)
             target_start = min_allowed
             
@@ -276,7 +273,7 @@ class BaseUnit():
         target_stop = stop_val if stop_val is not None else self.stop_timeout
         if target_stop < min_allowed:
             if stop_val is not None:
-                t = "Timeout protection: stop_timeout raised from {old}s to {min_allowed}s"
+                t = "timeout protection: stop_timeout raised from {old}s to {min_allowed}s"
                 self._logger.wrn(t, old=start_val, min_allowed=min_allowed)
             target_stop = min_allowed
 
@@ -291,7 +288,7 @@ class BaseUnit():
                 try:
                     self._module.on_net_connected(system_name)
                 except Exception as e:
-                    self._logger.err("User on_net_connected callback crashed: {e}", e=e)
+                    self._logger.err("user on_net_connected callback crashed: {e}", e=e)
 
     def on_net_disconnected(self, frame: Frame) -> None:
         """System bridge to forward disconnection event to the user module."""
@@ -301,7 +298,7 @@ class BaseUnit():
                 try:
                     self._module.on_net_disconnected(system_name)
                 except Exception as e:
-                    self._logger.err("User on_net_disconnected callback crashed: {e}", e=e)
+                    self._logger.err("user on_net_disconnected callback crashed: {e}", e=e)
 
 
 

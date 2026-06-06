@@ -19,6 +19,7 @@ class KernelTierView:
         self.rebuild_unit: Callable[[BaseUnit], None] = kernel.rebuild_unit
         self.get_manager: Callable[[Addr], ThreadManager] = kernel.get_manager_by_addr
         self.emit_progress: Callable[[str, int, int], None] = kernel.emit_boot_progress
+        self.units: dict[Addr, BaseUnit] = kernel._units
 
 class KernelBootMasterView:
     """Limited Kernel API for Tiers to ensure safety and precision."""
@@ -26,6 +27,7 @@ class KernelBootMasterView:
         self.cfg: Config = kernel._cfg
         self.log: Logger = kernel._log
         self.tiers: dict[int, Tier] = kernel._tiers
+        self.managers: dict[str, ThreadManager] = kernel._threads
         self.translate: Callable[..., str] = kernel._translator.translate
         self.restart: Callable[[None], None] = kernel.restart
         self.on_started: Callable[[None], None] = kernel.on_started

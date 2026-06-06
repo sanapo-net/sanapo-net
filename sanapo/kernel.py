@@ -21,7 +21,7 @@ from sanapo.protocol import Frame
 from sanapo.tier import Tier
 from sanapo.views import KernelTierView, KernelBootMasterView
 from sanapo.transport.adapters.queue import QueueAdapterTransport
-from sanapo.enums import SysType, UnitType, EnumRegistry, ThreadType, MasterMode
+from sanapo.enums import SysType, UnitType, EnumRegistry, ThreadType, BootTask
 from sanapo.enums import UnitSource, UnitSelection, ExecutionStrategy
 from sanapo.transport.services.udp import UdpBeacon, UdpListener
 from sanapo.transport.services.tcp import TcpService
@@ -176,6 +176,9 @@ class Kernel:
         def build_and_register(num: int, t_name: str, auto_flag: bool):
             logger = Logger(f"TIER_{t_name}", self._cfg, self._translator)
             new_tier = Tier(self.tier_view, logger, num, t_name, auto_flag)
+            if os.environ.get(f"SANAPO_STUCK_{name}") == "1":
+                new_tier.is_flaky = True
+                self._log.crt("Tier {nm} born with a BLACK MARK (chronically unstable)!", nm=t_name)
             self._tiers[num] = new_tier
             self._tiers_by_name[t_name] = new_tier
             self._recipes_tiers[num] = {"layer_num": num, "name": t_name, "auto": auto_flag}
@@ -374,12 +377,13 @@ class Kernel:
             self._log.wrn("Destroy Unit {n} without waiting", n=name)
         self._broker.deregister_addr(addr)
 
+    # TODO in v2: remove tier and thread sync logic for unit collections
     def rebuild_unit(self, unit: BaseUnit, addr: Addr):
         """Destroys and recreates a unit from its recipe"""
-        addr = addr
+        self._log.inf("rebuild Unit {addr}", addr=addr.unit)
         recipe = self._recipes_units.get(addr)
         if not recipe:
-            self._log.wrn("No recipe for unit {name}, rebuild_unit:failed", name=addr.unit)
+            self._log.wrn("no recipe for Unit {name}, rebuild_unit:failed", name=addr.unit)
             return
         manager = self.get_manager_by_addr(addr)
         if manager:
@@ -390,6 +394,12 @@ class Kernel:
         if manager:
             manager._units[addr] = new_unit
             manager._init_units[addr] = new_unit
+        tier_name = recipe.get("tier_name")
+        if tier_name:
+            tier_name = tier_name
+            tier = self._tiers_by_name[tier_name]
+            tier._units = [new_unit if u == unit else u for u in tier._units]
+            
         self._log.inf("Unit {name} was rebuiled", name=addr.unit)
     
     # --- Delletions ---
@@ -492,15 +502,16 @@ class Kernel:
 
     def restart(self) -> None:
         """Initiates global system reboot."""
-        self._log.inf("BOOT: Start Rebooting")
+        self._log.inf("start rebooting")
         self._is_rebooting = True
         self.stop()
 
+    # TODO in v2: calc timeout by Units, Tiers, Threads or/and update with stop-escalation
     def stop(self) -> None:
         """Initiates a graceful, multi-stage architecture shutdown sequence loop."""
         if self._is_shutdowning: 
             return
-        self._log.inf("STOP")
+        self._log.inf("stop")
         self._is_shutdowning = True
         
         # STAGE 1: Mute UDP discovery to prevent new incoming connections and noise
@@ -511,22 +522,18 @@ class Kernel:
             if hasattr(self._udp_listener, 'sock') and self._udp_listener.sock:
                 try: self._udp_listener.sock.close()
                 except: pass
-        self._log.dbg("Kernel: UDP Discovery and Beaconing safely terminated.")
+        self._log.dbg("UDP discovery and beaconing safely terminated")
 
         # STAGE 2: Cascade shutdown modules via active BootMaster monitoring loop
         self._boot_master.shutdown()
-        
-        # Drive BootMaster stages with a strict 3.0 seconds safety boundary timeout
-        # This allows intentional emergency isolation bypass tests to clear layout
         shutdown_start = perf_counter()
-        while self._boot_master.mode == MasterMode.SHUTDOWN:
-            if perf_counter() - shutdown_start > 3.0:
-                self._log.err("Kernel: Shutdown sequence timed out. Forcing exit.")
+        while self._boot_master.mode == BootTask.SHUTDOWN:
+            if perf_counter() - shutdown_start > self._cfg.FW_SUTDOWN_TIMEOUT:
+                self._log.err("shutdown: timeout, forcing exit")
                 break
-                
+            self._boot_master.step()
             for tier in self._tiers.values():
                 tier.step()
-            self._boot_master.step()
             sleep(0.005)
         
         # STAGE 3: Final cleanup of the active TCP federation infrastructure
@@ -535,10 +542,10 @@ class Kernel:
 
     def start(self) -> None:
         """Starts all managers and initiates tier ignition"""
-        self._log.inf("START")
+        self._log.inf("start")
         self._is_running = True
         self._start_network()
-        self._boot_master.ignite()
+        self._boot_master.boot()
 
     def step(self) -> None:
         """Execute one cycle of the conductor"""
@@ -577,7 +584,7 @@ class Kernel:
             self._udp_beacon.start()
             self._udp_listener.start()
         else:
-            self._log.inf("Network: Automatic discovery beacon loops DISABLED by configuration.")
+            self._log.inf("Network: Automatic discovery beacon loops disabled by configuration.")
 
     def _stop_network(self) -> None:
         """Gracefully disconnects links and forces thread joins to clear RAM footprints."""
@@ -761,7 +768,7 @@ class Kernel:
     # Callback for Tier TODO
     def emit_boot_progress(self, text: str, ready: int, total: int):
         """Bridge method: Kernel -> BootMaster."""
-        self._boot_master.update_sub_progress(text, ready, total)
+        self._boot_master.update_sub_progress_ui(text, ready, total)
     
     # Callback for Tier (and method for self)
     def get_manager_by_addr(self, addr: Addr) -> ThreadManager:

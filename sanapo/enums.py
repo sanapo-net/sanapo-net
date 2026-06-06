@@ -15,15 +15,17 @@ class Logs(str, Enum):
     DBG = "dbg"
 
 # Tier
-class TierTask(Enum):
-    NONE = "none"
+class TierStat(str, Enum):
+    CREATED = "created"
     STARTING = "starting"
+    WORKING = "working"
     STOPPING = "stopping"
+    STOPPED = "stopped"
 
 # BootMaster
-class MasterMode(Enum):
-    IDLE = "idle"
-    BOOTING = "booting"
+class BootTask(Enum):
+    NONE = "none"
+    BOOT = "boot"
     SHUTDOWN = "shutdown"
 
 # Protocol
@@ -103,6 +105,7 @@ class UnitStat(str, Enum):
     STOPPED = "stopped"
     HALTED = "halted"
     REBIRTHING = "rebirthing"
+    DESTROYING = "destroying"
     DESTROYED = "destroyed"
 
 # Thread

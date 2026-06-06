@@ -9,6 +9,8 @@ class Config():
     SYS_CONSIST_DELAY = 5
     SYS_CONSIST_PATH = "sys_consists/"
     THRESHOLD_BUS_OVERCROWDED = 100
+    FW_SUTDOWN_TIMEOUT = 5.0
+    SYSTEM_STUCK_REBOOT_MAX = 1
 
     # Logger.
     PATH_LOGS = "logs/"

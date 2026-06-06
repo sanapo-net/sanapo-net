@@ -68,7 +68,7 @@ class ThreadManager:
         """Adds unit with strict thread rules."""
         # If unit already is in thread.
         if unit.addr in self._units:
-            self._logger.wrn("Addetion unit: {addr} already in thread. Updating", addr=unit.addr)
+            self._logger.wrn("addetion Unit: {addr} already in Thread, updating", addr=unit.addr)
     
         is_living = unit.type in [UnitType.TICKABLE, UnitType.SIGMA]
         
@@ -80,7 +80,7 @@ class ThreadManager:
             )
         # If Addition SIGMA/TICKABLE to for ZOMBIE/UTILITY thread.
         if self.type == ThreadType.EVENT_DRIVEN and is_living:
-            t = "Guest '{addr}' (Tickable) is entering Event-Driven Thread"
+            t = "guest '{addr}' (Tickable) is entering Event-Driven Thread"
             self._logger.wrn(t, addr=unit.addr)
         
         # Addition.
@@ -101,6 +101,7 @@ class ThreadManager:
         self._update_step_timeout()
         return True
     
+    # TODO sync waiting to start
     def start(self, start_units: bool = False) -> None:
         """Starts all units, and starts thread."""
         if self.stat != ThreadStat.RELOADING:
@@ -124,7 +125,7 @@ class ThreadManager:
         """Restarts the OS thread but restores each unit to its previous state."""
         last_stat = self.stat
         self.stat = ThreadStat.RELOADING
-        t = "Reload initiated: {source}.{select}.{action}"
+        t = "reload initiated: {source}.{select}.{action}"
         self._logger.inf(t, source=source.name, select=select.name, action=action.name)
         
         # Take units from.
@@ -133,7 +134,7 @@ class ThreadManager:
         elif source == UnitSource.INITIAL:
             to_selection = list(self._init_units.values())
         else:
-            self._logger.err("Reload: wrong source: {source}", source=source)
+            self._logger.err("reload: wrong source: {source}", source=source)
             self.stat = last_stat
             return False
         
@@ -147,7 +148,7 @@ class ThreadManager:
 
         # Filter units to create in new thread.
         if select not in select_filter_map.keys():
-            self._logger.err("Reload: unforeseen select: {select}", select=select)
+            self._logger.err("reload: unforeseen select: {select}", select=select)
             self.stat = last_stat
             return False
         
@@ -160,7 +161,7 @@ class ThreadManager:
             alive = select_filter_map[UnitSelection.WORKING]
             units_to_run = [u for u in to_creating if u in alive]
         else:
-            self._logger.err("Reload: unforeseen action: {action}", action=action)
+            self._logger.err("reload: unforeseen action: {action}", action=action)
             self.stat = last_stat
             return False
 
@@ -183,7 +184,10 @@ class ThreadManager:
         self._thread.start()
         for u in to_creating:
             self.add_unit(u)
-            u.start()
+            try:
+                u.start()
+            except Exception as e:
+                self._logger.err("cant start Unit {unit}", unit=u)
         self._logger.inf("Thread replayed successfully")
         return True
 
@@ -204,7 +208,8 @@ class ThreadManager:
             unit_name = getattr(addr_obj, 'unit', "unknown") if addr_obj else "unknown"
             u_stat = getattr(unit, 'stat', None)
             
-            if u_stat not in [UnitStat.STOPPED, UnitStat.HALTED]:
+            # TODO in v2-v3: just unit.stop() only for WORKING
+            if u_stat != UnitStat.STOPPED:
                 self._logger.dbg("unit.stop() for {name}", name=unit_name)
                 try:
                     unit.stop()
@@ -222,7 +227,11 @@ class ThreadManager:
         
         self._stop_event.set()
         self.on_msg()
-        self._thread.join(timeout)
+        join_start = perf_counter()
+
+        while self._thread.is_alive():
+            if perf_counter() - join_start >= timeout: break
+            self._thread.join(timeout=0.002)
         
         if self.stat != ThreadStat.RELOADING: 
             self.stat = ThreadStat.JOINED
@@ -236,13 +245,10 @@ class ThreadManager:
     def _run_loop(self, units: list[BaseUnit]) -> None:
         """Main execution cycle."""
         active_units = units
-        t = "_run_loop: active_units={units}"
-        self._logger.dbg(t, th=self.name, units=active_units)
+        self._logger.dbg("run", th=self.name, units=active_units)
         self._last_fps_calc = perf_counter()
         self.stat = ThreadStat.WORKING
         try:
-            t = "_run_loop: active_units={units}"
-            self._logger.dbg(t, th=self.name, units=active_units)
             while not self._stop_event.is_set():
                 self.last_step = start_time = perf_counter()
                 tct = self._handle_commands(active_units)
@@ -264,7 +270,7 @@ class ThreadManager:
                         if unit.step(): any_work_done = True
                     except Exception as e:
                         unit.stat = UnitStat.HALTED
-                        self._logger.err("Step-err in {addr}: {e}", addr=unit.addr, e=e)
+                        self._logger.err("step-err in {addr}: {e}", addr=unit.addr, e=e)
                         if unit in active_units: active_units.remove(unit)
                 
                 self._manage_thread_type(has_tickables)
@@ -281,7 +287,7 @@ class ThreadManager:
                         self._wakeup_event.clear()
         except Exception as e:
             self.stat = ThreadStat.HALTED
-            self._logger.crt("THREAD CRIMINAL CRASH inside _run_loop: {e}", e=e)
+            self._logger.crt("Thread criminal crash inside _run_loop: {e}", e=e)
                     
     def _handle_commands(self, active_units: list[BaseUnit]) -> float:
         """Process ADD/REMOVE/SET_TCT commands from the queue."""
@@ -310,7 +316,7 @@ class ThreadManager:
                     unit.destroy()
                     
         except Exception as e:
-            self._logger.err("Command processing error: {e}", e=e)
+            self._logger.err("command processing error: {e}", e=e)
         return self._tct
 
     def _update_step_timeout(self) -> None:
@@ -336,12 +342,13 @@ class ThreadManager:
         if has_tickables and self.type != ThreadType.TICKABLE:
             # A 'Living' unit entered a 'Lamp' club - uncomfortable but allowed.
             self.type = ThreadType.TICKABLE
-            self._logger.wrn("Tickable unit detected! Switching to TICKABLE mode")
+            self._logger.wrn("TICKABLE Unit detected! Switching to TICKABLE mode")
         
         elif not has_tickables and self._want_be_event_driven and self.type != self._init_type:
             # All guests left, return to original club rules.
             self.type = self._init_type
-            self._logger.inf("No tickables left. Returning to {name}", name=self._init_type.name)
+            t = "no TICKABLE Units left, returning to {name}"
+            self._logger.inf(t, name=self._init_type.name)
 
     def _calc_fps(self) -> None:
         """Calculate cycles per second (FPS)."""
@@ -399,14 +406,14 @@ class ThreadManager:
         self.on_msg()
         start_time = perf_counter()
         while perf_counter() - start_time < timeout:
+            if unit.stat == UnitStat.WORKING:
+                self._logger.inf("reborn Module {addr}: success", addr=unit.addr)
+                return True
             if unit.stat not in [UnitStat.HALTED, UnitStat.DESTROYED]:
                 threading.Event().wait(check_interval)
                 continue
-            if unit.stat == UnitStat.WORKING:
-                self._logger.inf("Unit {addr} successfully reborn", addr=unit.addr)
-                return True
             threading.Event().wait(check_interval)
-        self._logger.wrn("Reborn timeout for {addr}", addr=unit.addr.unit)
+        self._logger.wrn("reborn Module {addr}: timeout", addr=unit.addr.unit)
         return False
 
     def destroy_unit(self, unit: BaseUnit, timeout: float | None = None) -> bool:
@@ -429,8 +436,8 @@ class ThreadManager:
         start_time = perf_counter()
         while perf_counter() - start_time < timeout:
             if unit.stat == UnitStat.DESTROYED:
-                self._logger.inf("Unit {addr} successfully destroyed", addr=unit.addr)
+                self._logger.inf("destroy Unit {addr}: success", addr=unit.addr)
                 return True
             threading.Event().wait(check_interval)
-        self._logger.wrn("Destroy timeout for {addr}", addr=unit.addr)
+        self._logger.wrn("destroy Unit {addr}: timeout", addr=unit.addr)
         return False
