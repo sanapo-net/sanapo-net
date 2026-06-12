@@ -9,14 +9,13 @@ from logging.handlers import RotatingFileHandler
 from typing import TYPE_CHECKING
 
 from sanapo.addr import Addr
-from sanapo.protocol import Frame
 from sanapo.enums import Logs
 
 if TYPE_CHECKING:
     from sanapo.config import Config
     from sanapo.translator import Translator
 
-# TODO del param frame support
+# TODO in v2: different output and settings for WrameWork log and APP log
 class Logger:
     _print_lock = threading.Lock()
     def __init__(self,
@@ -38,7 +37,7 @@ class Logger:
     def set_translator(self, translator: Translator) -> None:
         self._translator = translator
 
-    def _output(self, level: Logs, text: str, frame: Frame | None = None, **kwargs) -> None:
+    def _output(self, level: Logs, text: str, **kwargs) -> None:
         
         if self._translator:
             translated_text = self._translator.translate(text, **kwargs)
@@ -81,25 +80,18 @@ class Logger:
             self.file_handler.emit(logging.LogRecord(
                 self._addr, logging.INFO, "", 0, log_str, None, None
             ))
-
-        # Message (json).
-        if level in self._cfg.DEFAULT_LOG_FLAGS["message"] and frame:
-            record = {"log": log_str, "raw": frame.to_dict()}
-            path_file_jsonl = self._cfg.PATH_LOGS + "traffic.jsonl"
-            with open(path_file_jsonl, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
     
-    def err(self, text: str, frame: Frame | None = None, **kwargs) -> None:
-        self._output(Logs.ERR, text, frame, **kwargs)
+    def err(self, text: str, **kwargs) -> None:
+        self._output(Logs.ERR, text, **kwargs)
 
-    def crt(self, text: str, frame: Frame | None = None, **kwargs) -> None:
-        self._output(Logs.CRT, text, frame, **kwargs)
+    def crt(self, text: str, **kwargs) -> None:
+        self._output(Logs.CRT, text, **kwargs)
 
-    def wrn(self, text: str, frame: Frame | None = None, **kwargs) -> None:
-        self._output(Logs.WRN, text, frame, **kwargs)
+    def wrn(self, text: str, **kwargs) -> None:
+        self._output(Logs.WRN, text, **kwargs)
 
-    def inf(self, text: str, frame: Frame | None = None, **kwargs) -> None:
-        self._output(Logs.INF, text, frame, **kwargs)
+    def inf(self, text: str, **kwargs) -> None:
+        self._output(Logs.INF, text, **kwargs)
 
-    def dbg(self, text: str, frame: Frame | None = None, **kwargs) -> None:
-        self._output(Logs.DBG, text, frame, **kwargs)
+    def dbg(self, text: str, **kwargs) -> None:
+        self._output(Logs.DBG, text, **kwargs)

@@ -7,6 +7,7 @@ import json
 import hmac
 import hashlib
 import os
+import traceback
 from time import perf_counter
 from typing import TYPE_CHECKING
 
@@ -66,13 +67,13 @@ class TcpConnection(threading.Thread):
         self._service: "TcpService" = service
         self.stitcher = FrameStitcher(config)
         self.last_rx = perf_counter()
-        self.is_alive = True
+        self._alive = True
 
     def run(self):
         """Continuous receiving loop with heartbeat check."""
         # set a shorter timeout for recv to check idle time periodically
         self.sock.settimeout(5.0) 
-        while self.is_alive:
+        while self._alive:
             try:
                 data = self.sock.recv(4096)
                 if not data:
@@ -95,7 +96,7 @@ class TcpConnection(threading.Thread):
                 self._log.crt("TCP: Security violation from {addr}: {e}", addr=self.addr, e=e)
                 self.stop()
             except Exception as e:
-                if self.is_alive:
+                if self._alive:
                     t = "TCP: Connection with {name} lost: {e}"
                     self._log.err(t, name=self.remote_system_name, e=e)
                 self.stop()
@@ -118,11 +119,12 @@ class TcpConnection(threading.Thread):
         except Exception:
             return False
 
+    # logic error with _alive
     def stop(self):
         """Graceful resource cleanup."""
-        if not self.is_alive:
+        if not self._alive:
             return
-        self.is_alive = False
+        self._alive = False
         try:
             self.sock.close()
         except: 
@@ -268,7 +270,9 @@ class TcpService(threading.Thread):
 
             # 3. Receive System Name length and string.
             name_len_bytes = sock.recv(4)
-            if not name_len_bytes: return
+            if not name_len_bytes:
+                sock.close()
+                return
             name_len = struct.unpack('>I', name_len_bytes)[0]
             remote_name = sock.recv(name_len).decode('utf-8')
 
@@ -436,7 +440,7 @@ class TcpService(threading.Thread):
             
         # NEW SANITARY PAD: Cascadely join all closed socket threads to prevent RAM leakage leakage
         for conn in conns:
-            if conn.is_alive():
+            if conn.is_alive:
                 conn.join(timeout=0.1)
                 
         self._log.inf("TCP: All network links explicitly disconnected and joined.")
@@ -487,10 +491,10 @@ class TcpService(threading.Thread):
         self._cfg.NET_AUTO_CONNECT = state
         status = "ENABLED" if state else "DISABLED"
         self._log.inf("TCP: Automatic discovery connection is {status}", status=status)
-
+    
     def connect_to(self, host: str, port: int) -> bool:
         """Forcefully initiates an outbound TCP connection to the specified node with immediate passport validation."""
-        try:
+        if True:#try:
             # Check if there is already an active connection with this address
             with self._lock:
                 for conn in self._connections.values():
@@ -562,9 +566,9 @@ class TcpService(threading.Thread):
             self._register_connection(remote_name, sock, (host, port))
             self._unpack_and_register_manifests(remote_m_bytes, remote_name)
             return True
-        except Exception as e:
-            self._log.err("TCP: Explicit connect to {host}:{port} failed: {e}", host=host, port=port, e=e)
-            return False
+        #except Exception as e:
+        #    self._log.err("TCP: Explicit connect to {host}:{port} failed: {e}", host=host, port=port, e=e)
+        #    return False
 
 
     def is_conn_alive(self, name: str) -> bool:

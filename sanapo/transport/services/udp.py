@@ -33,9 +33,9 @@ class UdpBeacon(threading.Thread):
         """Broadcasts the system identity at regular intervals."""
         self._is_running = True
         # AF_INET = IPv4, SOCK_DGRAM = UDP
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             # Enable broadcasting
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             
             self._log.inf("UDP: Beacon started as '{name}'", name=self._cfg.SYSTEM_NAME)
             
@@ -44,7 +44,7 @@ class UdpBeacon(threading.Thread):
                     # ONLY SEND IF DISCOVERY MODE IS ACTIVE IN CONFIG
                     if self._cfg.NET_AUTO_CONNECT:
                         # Send to the whole local network
-                        s.sendto(self._packet, ('<broadcast>', self._cfg.UDP_PORT_DEFAULT))
+                        sock.sendto(self._packet, ('<broadcast>', self._cfg.UDP_PORT_DEFAULT))
                 except Exception as e:
                     self._log.err("UDP: Beacon send error: {e}", e=e)
                 
@@ -64,17 +64,19 @@ class UdpListener(threading.Thread):
 
     def run(self):
         self._is_running = True
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             # Bind to all interfaces to catch broadcasts
-            s.bind(('', self._cfg.UDP_PORT_DEFAULT))
-            
+            sock.bind(('', self._cfg.UDP_PORT_DEFAULT))
+            sock.settimeout(0.2) 
             self._log.inf("UDP: Listener active, waiting for neighbors...")
             
             while self._is_running:
                 try:
-                    data, addr = s.recvfrom(1024)
+                    data, addr = sock.recvfrom(1024)
                     self._process_beacon(data, addr)
+                except socket.timeout:
+                    continue
                 except Exception as e:
                     self._log.err("UDP: Listener error: {e}", e=e)
 
@@ -82,7 +84,7 @@ class UdpListener(threading.Thread):
         """Parses incoming beacon and initiates TCP connection if new."""
         if not getattr(self._cfg, 'NET_AUTO_CONNECT', True):
             return
-        try:
+        if True:#try:
             if len(data) < 16: 
                 return
             
@@ -102,6 +104,11 @@ class UdpListener(threading.Thread):
             # HARD CORE LOCALHOST PAD: Extract current physical interface IP interface card
             target_ip = addr[0]
             my_local_ip = socket.gethostbyname(socket.gethostname())
+            if (target_ip == my_local_ip or 
+                target_ip == "0.0.0.0" or 
+                target_ip.startswith("127.") or
+                target_ip == "::1"):
+                target_ip = "127.0.0.1"
             
             # If the beacon came from our own machine network card, force loopback interface
             if target_ip == my_local_ip or target_ip == "0.0.0.0":
@@ -110,5 +117,6 @@ class UdpListener(threading.Thread):
             # Instruct the framework service to connect via secure loopback routing
             self._tcp_service.connect_to(target_ip, port)
             
-        except Exception:
-            pass
+        #except Exception as e:
+        #    # TODO in v2: refact it
+        #    print("UDP: process beacon problems: {e}")

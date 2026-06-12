@@ -102,7 +102,7 @@ def run_test_node(node_name: str):
     Config.ADDR_BROKER_STR = "BROKER"
     Config.BROKER_BUS_READ_LIMIT = 50
     Config.MAGIC_HEADER = b"SanaPo10"
-    Config.NET_PROJECT_TOKEN = b"PROJ99"
+    Config.NET_PROJECT_TOKEN = b"PROJ00"
     Config.NET_ALLOWED_IPS = []
     Config.NEEDS_NET_AUTO_CONNECT = True
     Config.HIBERNATE_MODE = True

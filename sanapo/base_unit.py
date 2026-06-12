@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from sanapo.protocol import Frame
     from sanapo.message_broker import MessageBroker
 
+# TODO add "UNIT: " in logs
 class BaseUnit():
     def __init__(self,
             config: Config,
@@ -285,6 +286,7 @@ class BaseUnit():
         system_name = frame.payload.get("sys_name")
         if system_name:
             if self._module and hasattr(self._module, 'on_net_connected'):
+                self._logger.dbg("try call Module.on_net_connected")
                 try:
                     self._module.on_net_connected(system_name)
                 except Exception as e:
@@ -295,6 +297,7 @@ class BaseUnit():
         system_name = frame.payload.get("sys_name")
         if system_name:
             if self._module and hasattr(self._module, 'on_net_disconnected'):
+                self._logger.dbg("try call Module.on_net_disconnected")
                 try:
                     self._module.on_net_disconnected(system_name)
                 except Exception as e:

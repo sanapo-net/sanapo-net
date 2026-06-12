@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from sanapo.transport.services.tcp import TcpService
     from sanapo.manifest import Manifest
 
+# TODO in v2: resolve collision with diffrent EVT CMD from different projects
 class MessageBroker:
     """
     Core Router of sanapo framework.
@@ -55,7 +56,7 @@ class MessageBroker:
     def register_federation_route(self, system_name: str, transport: BaseAdapterTransport):
         """Registers a link to another sanapo instance."""
         self._federation_routes[system_name] = transport
-        self._log.inf("Federation link to '{name}' active", name=system_name)
+        self._log.inf("BROKER: Federation link to '{name}' active", name=system_name)
 
     def step(self) -> bool:
         """Process a slice of messages from the global bus."""
@@ -211,4 +212,3 @@ class MessageBroker:
                 addr_str = f"{self._cfg.SYSTEM_NAME}:{u_name}"
                 public_maps[addr_str] = manifest.to_dict()
         return public_maps
-

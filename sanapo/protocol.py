@@ -111,13 +111,13 @@ class Frame:
         m_type = MsgType(data["msg_type"])
         sub_val = data.get("sub_type")
         if data.get("recipient"):
-            recipient = broker.get_addr(data["recipient"], create=False, find=True)
+            recipient = broker.get_addr(data["recipient"], create=True, find=True)
         else:
             recipient = None
 
         frame = cls(
             msg_type=m_type,
-            sender=broker.get_addr(data["sender"], create=False, find=True), 
+            sender=broker.get_addr(data["sender"], create=True, find=True), 
             payload=data.get("payload", {}),
             sys_type=get_e(reg.sys, sub_val) if m_type == MsgType.SYS else None,
             evt_type=get_e(reg.evt, sub_val) if m_type == MsgType.EVT else None,
@@ -138,21 +138,23 @@ class Frame:
     @classmethod
     def from_dict_light(cls, data: dict, reg: EnumRegistry, broker: MessageBroker) -> 'Frame':
         """
-        Lightweight frame reconstruction. 
+        Lightweight frame reconstruction.
         Restores header Enums using the Registry while keeping the payload raw.
         """
         m_type = MsgType(data["msg_type"])
         sub_val = data.get("sub_type")
+        
+        sender_addr = broker.get_addr(data["sender"], create=True, find=True)
+        
+        recipient = None
         if data.get("recipient"):
-            recipient = broker.get_addr(data.get("recipient"), create=False, find=True)
-        else:
-            recipient = None
+            recipient = broker.get_addr(data.get("recipient"), create=True, find=True)
 
         # Fast mapping without deep validation of payload structure
         return cls(
             msg_type=m_type,
-            sender=broker.get_addr(data["sender"], create=False, find=True),
-            payload=data.get("payload", {}), # Keep payload as raw dict/data
+            sender=sender_addr,
+            payload=data.get("payload", {}),
             sys_type=reg.sys(sub_val) if m_type == MsgType.SYS else None,
             evt_type=reg.evt(sub_val) if m_type == MsgType.EVT else None,
             cmd_type=reg.cmd(sub_val) if m_type == MsgType.CMD else None,

@@ -235,11 +235,11 @@ class Kernel:
             if thread_name not in self._threads:
                 thread = self.add_thread(thread_name)
                 if thread:
-                    t = "Created automatically nonexistent thread {thread_name} for unit {u_name}"
+                    t = "Kernel: created automatically nonexistent Thread {thread_name} for Unit {u_name}"
                     self._log.inf(t, u_name=addr.unit, thread_name=thread_name)
                 else:
                     delleting = self._destroy_unit(unit)
-                    t = "Unit {u} is created, but thread {t} is not auto-created. Unit del:{d}"
+                    t = "Unit {u} is created, but Thread {t} is not auto-created. Unit del:{d}"
                     self._log.crt(t, u=addr.unit, t=thread_name, d=delleting)
                     return False
             self._threads[thread_name].add_unit(unit)
@@ -250,11 +250,11 @@ class Kernel:
                 # Direct the exact inputs straight into your smart add_tier factory
                 tier = self.add_tier(tier_layer, tier_name)
                 if tier:
-                    t = "Created automatically nonexistent tier {t} for unit {u}"
+                    t = "Kernel: created automatically nonexistent Tier {t} for Unit {u}"
                     self._log.inf(t, u=addr.unit, t=f"{tier.name}|{tier.layer_num}")
                 else:
                     delleting = self._destroy_unit(unit)
-                    t = "Unit {u} is created, but tier {t} is not auto-created. Unit del:{d}"
+                    t = "Unit {u} is created, but Tier {t} is not auto-created. Unit del:{d}"
                     self._log.crt(t, u=addr.unit, t=f"{tier_name}|{tier_layer}", d=delleting)
                     return False
             
@@ -787,7 +787,7 @@ class Kernel:
     def on_net_connected(self, frame: Frame) -> None:
         remote_system = frame.payload.get("sys_name")
         self._log.inf("Kernel: Federation link confirmed with node '{s}'. Preparation complete.", s=remote_system)
-        # Custom logic can be added here if the kernel needs to act immediately upon connection
+        self._broker.broadcast_sys_message(SysType.NET_CONNECTED, {"sys_name": remote_system})
 
     def on_net_disconnected(self, frame: Frame) -> None:
         remote_system = frame.payload.get("sys_name")
@@ -818,15 +818,15 @@ class Kernel:
     def on_net_manifest_received(self, frame: Frame) -> None:
         remote_system = frame.payload.get("sys_name")
         remote_manifests = frame.payload.get("manifests", {})
+        t = "Kernel: received {count} manifests from {sys}"
+        self._log.inf(t, count=len(remote_manifests), sys=remote_system)
         
         # Save raw manifest dictionaries directly into the broker's cache
         for addr_str, m_dict in remote_manifests.items():
             self._broker.get_addr(addr_str, create=True, find=False)
             self._broker._remote_manifests[addr_str] = m_dict
-            
-        self._log.inf("Kernel: Registered and cached {count} passports from '{sys}'",
-                      count=len(remote_manifests), sys=remote_system)
-
+        t = "Kernel: Registered and cached {count} passports from '{sys}'"
+        self._log.inf(t, count=len(remote_manifests), sys=remote_system)
 
     # Callback for WatchDog: Exposes live active thread pools dict cleanly
     def get_managers(self) -> dict[str, ThreadManager]:

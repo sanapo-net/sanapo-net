@@ -5,9 +5,18 @@ from typing import Type
 
 from sanapo.addr import Addr
 
+class BriefEnumMixin:
+    """Mixin for outputting text/value."""
+    #def __repr__(self) -> str:
+    #    return f"<{self.__class__.__name__}.{self.name}>"
+
+    #def __str__(self) -> str:
+    #    return f"{self.__class__.__name__}.{self.name}"
+    pass
+
 # Logger
 @unique
-class Logs(str, Enum):
+class Logs(BriefEnumMixin, str, Enum):
     CRT = "crt"
     ERR = "err"
     WRN = "wrn"
@@ -15,7 +24,7 @@ class Logs(str, Enum):
     DBG = "dbg"
 
 # Tier
-class TierStat(str, Enum):
+class TierStat(BriefEnumMixin, str, Enum):
     CREATED = "created"
     STARTING = "starting"
     WORKING = "working"
@@ -23,21 +32,21 @@ class TierStat(str, Enum):
     STOPPED = "stopped"
 
 # BootMaster
-class BootTask(Enum):
+class BootTask(BriefEnumMixin, str, Enum):
     NONE = "none"
     BOOT = "boot"
     SHUTDOWN = "shutdown"
 
 # Protocol
 @unique
-class MsgType(str, Enum):
+class MsgType(BriefEnumMixin, str, Enum):
     CMD = "cmd"
     RPT = "rpt"
     EVT = "evt"
     SYS = "sys"
 
 @unique
-class SysType(str, Enum):
+class SysType(BriefEnumMixin, str, Enum):
     """SystemType for the shared bus"""
     APP_SHUTDOWN = "app_shutdown"
     APP_RELOAD = "app_reload"
@@ -63,7 +72,7 @@ class SysType(str, Enum):
     NET_MANIFEST_RECEIVED = "net_manifest_received"
 
 @unique
-class RptType(str, Enum):
+class RptType(BriefEnumMixin, str, Enum):
     """ReportType for the shared bus"""
     DONE = "done"
     INTO_WORK = "into_work"
@@ -75,7 +84,7 @@ class RptType(str, Enum):
     EXECUTION_TIMEOUT = "execution_timeout"
 
 @unique
-class RptReason(str, Enum):
+class RptReason(BriefEnumMixin, str, Enum):
     """For CANT_DO and TIME_EXTENSION_REQUEST"""
     OK = "OK"
     # Rejection reasons (CANT_DO)
@@ -84,18 +93,19 @@ class RptReason(str, Enum):
     RESOURCE_LOCKED = "resource_locked" # Hardware or file is busy
     INTERNAL_ERROR = "internal_error"   # Unhandled exception in module
     NOT_IMPLEMENTED = "not_implemented"
+    EXEC_EXCEPTION = "exec_exception"
     ANOTHER = "another"
 
 # Unit
 @unique
-class UnitType(str, Enum):
+class UnitType(BriefEnumMixin, str, Enum):
     UTILITY = "utility"   # Without loop, without Secretery:  mod + log
     SIGMA = "sigma"       # With loop, without Secretery:  mod_step + log
     ZOMBIE = "zombie"     # Controlled by Secretery (via callbacks):  mod + secr_step + log
     TICKABLE = "tickable" # Without loop, Secretery has loop, calls step():  (mod + secr)_step + log
 
 @unique
-class UnitStat(str, Enum):
+class UnitStat(BriefEnumMixin, str, Enum):
     CREATING = "creating"
     CREATED = "created"
     STARTING = "starting"
@@ -116,7 +126,7 @@ class ThreadType(Enum):
     ONLY_EVENT_DRIVEN = 2 # Strict VIP club (No Tickables allowed)
 
 @unique
-class ThreadStat(Enum):
+class ThreadStat(BriefEnumMixin, str, Enum):
     CREATED = "created"
     STARTING = "starting"
     WORKING = "working"
@@ -126,26 +136,26 @@ class ThreadStat(Enum):
     HALTED = "halted"
 
 @unique
-class UnitSource(Enum): # WHERE TO TAKE FROM (Source of objects)
+class UnitSource(BriefEnumMixin, str, Enum): # WHERE TO TAKE FROM (Source of objects)
     CURRENT = "current" # From active self._units dictionary
     INITIAL = "initial" # From the original config/startup list
 
 @unique
-class UnitSelection(Enum): # WHOM TO TAKE (Object state filter)
+class UnitSelection(BriefEnumMixin, str, Enum): # WHOM TO TAKE (Object state filter)
     ALL = "all"         # Select everything
     ALIVE = "alive"     # Only those whose thread is currently running
     DEAD = "dead"       # Only those finished or crashed (not alive)
     WORKING = "working" # Only those with 'WORKING' status
 
 @unique
-class ExecutionStrategy(Enum): # WHOM TO START (Post-creation action)
+class ExecutionStrategy(BriefEnumMixin, str, Enum): # WHOM TO START (Post-creation action)
     NONE = "none"      # Create objects but do not call .start()
     ALL = "all"        # Start all selected units
     WORKING = "working"# Start only those that were running before the reload
 
 # Translator
 @unique
-class TranspReadStat(Enum):
+class TranspReadStat(BriefEnumMixin, str, Enum):
     OK = "ok"
     EMPTY = "empty"
     CORRUPTED = "corrupted"
@@ -199,7 +209,7 @@ class EnumRegistry:
             transp_stat=TranspReadStat,
             logs=Logs
         )
-    
+
 # Register
 @dataclass
 class EnumRegistry:

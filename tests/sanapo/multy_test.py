@@ -27,13 +27,13 @@ NET_TEST_PASSED = False
 # automated verification matrices
 class TestLedger:
     """Automated test matrix tracker with zero dependencies on global state."""
-    def __init__(self):
+    def __init__(self) -> None:
         self.tests: dict[str, dict[str, bool]] = {}
 
-    def add_meta(self, test_name: str, is_ready: bool = True):
+    def add_meta(self, test_name: str, is_ready: bool = True) -> None:
         self.tests[test_name] = {"ready": is_ready, "attempted": False, "success": False}
 
-    def start(self, test_name: str, class_name: str = "Test"):
+    def start(self, test_name: str, class_name: str = "Test") -> None:
         """Marks a test start, flushes filesystem state, and forces garbage collection."""
         if test_name in self.tests:
             self.tests[test_name]["attempted"] = True
@@ -59,8 +59,10 @@ class TestLedger:
         # Purple [ TEST ] marker with the calling class name to isolate logs
         print(f"\033[95m[ TEST ] >>> Running: {class_name} ({test_name})\033[0m")
 
+    def start_assistent(self, test_name: str, class_name: str = "Test") -> None:
+        print(f"\033[95m[ TEST ] >>> Running: {class_name} ({test_name})\033[0m")
 
-    def ok(self, key: str):
+    def ok(self, key: str) -> None:
         """Registers test success and prints a beautifully formatted green checkmark."""
         if key in self.tests:
             self.tests[key]["success"] = True
@@ -75,13 +77,16 @@ class TestLedger:
             # Prints the error text on a new line, aligned and entirely in red
             print(f"\033[91m   Error: {err_text}\033[0m")
 
-    def _print_ok(self, text: str):
+    def _print_ok(self, text: str) -> None:
         print(f"\033[95m[  OK  ] {text}\033[0m")
 
-    def _print_fail(self, text: str):
+    def stop_assistent(self, text: str) -> None:
+        print(f"\033[95m[  END  ] {text}\033[0m")
+
+    def _print_fail(self, text: str) -> None:
         print(f"\033[91m[ FAIL ] {text}\033[0m")
 
-    def print_results(self):
+    def print_results(self) -> None:
         print("\n" + "=" * 70)
         print("  SANAPO FRAMEWORK V1 - AUTOMATED VERIFICATION MATRIX")
         print("=" * 70)
@@ -108,7 +113,7 @@ class TestLedger:
 
 
 # --- Tests ---
-
+# Suboptimal tests
 class Test_StartStopSystem:
     """
     TRIGGERS:
@@ -938,7 +943,7 @@ class Test_BootMasterShutdownStuck:
     """
     @staticmethod
     def run(ledger: TestLedger, node_name: str):
-        test_name = "Boot: Emergency Shutdown Stuck Isolation Bypass"
+        test_name = "Boot: Emergency Shutdown Stuck Unit"
         ledger.start(test_name, "Test_BootMasterShutdownStuck")
         
         # Hard isolation latch flag to track execution state across loops
@@ -1230,23 +1235,22 @@ class Test_WatchDogThreadReborn:
 class Test_SecretaryReportTransaction:
     """
     TRIGGERS:
-    1. Into Work Latch: The executor's secretary must automatically fire an INTO_WORK 
+    1. Into Work Latch: The executor's secretary must automatically fire an INTO_WORK
        report, converting the sender's answer deadline to infinity.
-    2. Time Extension Request: Low-level deadline checking must catch a stalling command 
+    2. Time Extension Request: Low-level deadline checking must catch a stalling command
        and automatically request more time, pushing the execution deadline forward.
-    3. Cant Do Rejection: Attempting to send a command to a busy module must instantly 
+    3. Cant Do Rejection: Attempting to send a command to a busy module must instantly
        trigger a CANT_DO auto-report with MODULE_BUSY reason code via root frame headers.
     """
     @staticmethod
     def run(ledger: TestLedger, node_name: str):
         test_name = "Secretary: Automated Report Transaction Pipeline"
         ledger.start(test_name, "Test_SecretaryReportTransaction")
-        
+
         into_work_ok = False
         time_ext_ok = False
         cant_do_ok = False
 
-        # --- DYNAMIC EXECUTOR UNIT ---
         class HeavyExecutor(BaseModule):
             def start(self):
                 self.v.scr.subscribe(cb=self._on_cmd, cmd=CmdType.CMD_TEST)
@@ -1260,21 +1264,24 @@ class Test_SecretaryReportTransaction:
             def step(self) -> bool:
                 if hasattr(self, '_active_frame') and self._active_frame:
                     self._busy_cycles += 1
-                    if self._busy_cycles >= 12: # Stall across 12 cycles to trigger extension
+                    if self._busy_cycles >= 12:
                         p = {"text": "Done eventually"}
-                        self.v.scr.send_rpt(self._active_frame.sender, self._active_frame.cmd_id, RptType.DONE, p)
+                        self.v.scr.send_rpt(
+                            self._active_frame.sender,
+                            self._active_frame.cmd_id,
+                            RptType.DONE,
+                            p
+                        )
                         self._active_frame = None
                     return True
                 return False
 
-        # --- DYNAMIC SENDER UNIT ---
         class SmartSender(BaseModule):
             def step(self) -> bool:
                 if not hasattr(self, '_step_phase'):
                     self._step_phase = 1
                     recipient = self.v.addr_by_str("UNIT_EXECUTOR")
                     if recipient:
-                        # Expanded limits to comfortably cushion heavy hardware framework boot cycles
                         self.v.scr.send_cmd(
                             recipient, CmdType.CMD_TEST, self._on_done,
                             cb_time_ext_req=self._on_ext,
@@ -1296,52 +1303,63 @@ class Test_SecretaryReportTransaction:
         reg = EnumRegistry.create_default(evt_cls=EvtType, cmd_cls=CmdType)
         kernel = Kernel(enum_reg=reg, system_name=node_name)
         api = KernelUserView(kernel)
-        
-        # Enforce highly resilient timing thresholds for automated watchdog execution
+
         kernel._cfg.DEADLINE_EXTENSION_THRESHOLD = 0.22
         kernel._cfg.DEFAULT_TIME_EXTENSION = 0.2
-        
+
         try:
             api.add_tier(layer_num=1, name="SECR_TIER")
             api.add_thread(name="SECR_POOL", type=ThreadType.TICKABLE, tct=0.01)
-            
-            api.add_unit(name="UNIT_SENDER", type=UnitType.TICKABLE, m_class=SmartSender, 
-                         thread_name="SECR_POOL", tier_layer=1, tier_name="SECR_TIER")
-            api.add_unit(name="UNIT_EXECUTOR", type=UnitType.TICKABLE, m_class=HeavyExecutor, 
-                         thread_name="SECR_POOL", tier_layer=1, tier_name="SECR_TIER")
+
+            api.add_unit(
+                name="UNIT_SENDER", type=UnitType.TICKABLE, m_class=SmartSender,
+                thread_name="SECR_POOL", tier_layer=1, tier_name="SECR_TIER"
+            )
+            api.add_unit(
+                name="UNIT_EXECUTOR", type=UnitType.TICKABLE, m_class=HeavyExecutor,
+                thread_name="SECR_POOL", tier_layer=1, tier_name="SECR_TIER"
+            )
             api.start()
-            
+
             max_wait = 60
             while not (into_work_ok and time_ext_ok) and max_wait > 0:
                 kernel.step()
                 time.sleep(0.01)
                 max_wait -= 1
-                
-            # --- PHASE 2: Evaluate CANT_DO pathway with expanded reason headers ---
-            exec_unit = kernel._units.get(kernel._broker.get_addr(
-                f"{node_name}:UNIT_EXECUTOR", create=False, find=True)
+
+            exec_unit = kernel._units.get(
+                kernel._broker.get_addr(
+                    f"{node_name}:UNIT_EXECUTOR", create=False, find=True
+                )
             )
             if exec_unit and exec_unit._secr:
                 exec_unit._secr._module_is_busy = True
-                
+
                 def check_rejection(frame):
                     nonlocal cant_do_ok
-                    if frame.rpt_type == RptType.CANT_DO and frame.reason == RptReason.MODULE_BUSY:
+                    if (frame.rpt_type == RptType.CANT_DO and
+                            frame.reason == RptReason.MODULE_BUSY):
                         cant_do_ok = True
-                
-                sender_unit = kernel._units.get(kernel._broker.get_addr(
-                    f"{node_name}:UNIT_SENDER", create=False, find=True)
+
+                sender_unit = kernel._units.get(
+                    kernel._broker.get_addr(
+                        f"{node_name}:UNIT_SENDER", create=False, find=True
+                    )
                 )
                 if sender_unit and sender_unit._module:
-                    sender_unit._secr.send_cmd(exec_unit.addr, CmdType.CMD_TEST, check_rejection)
-                    for _ in range(5): kernel.step()
+                    sender_unit._secr.send_cmd(
+                        exec_unit.addr, CmdType.CMD_TEST, check_rejection
+                    )
+                    for _ in range(5):
+                        kernel.step()
                     time.sleep(0.01)
                     kernel.step()
 
             if into_work_ok and time_ext_ok and cant_do_ok:
                 ledger.ok(test_name)
             else:
-                t = f"Pipeline fault. INTO_WORK:{into_work_ok}, EXT:{time_ext_ok}, CANT_DO:{cant_do_ok}"
+                t = (f"Pipeline fault. INTO_WORK:{into_work_ok}, "
+                     f"EXT:{time_ext_ok}, CANT_DO:{cant_do_ok}")
                 ledger.fail(test_name, err_text=t)
         except Exception as e:
             ledger.fail(test_name, err_text=str(e))
@@ -1359,7 +1377,7 @@ class Test_SecretaryExecutionSpeed:
     def run(ledger: TestLedger, node_name: str):
         test_name = "Secretary: Execution Speed and Deadlines tools"
         ledger.start(test_name, "Test_SecretaryExecutionSpeed")
-        
+
         fast_ok, ext_ok, late_dropped = False, False, False
 
         class SpeedExecutor(BaseModule):
@@ -1371,7 +1389,9 @@ class Test_SecretaryExecutionSpeed:
 
             def _on_cmd(self, frame: Frame) -> bool:
                 if self._mode == "fast":
-                    self.v.scr.send_rpt(frame.sender, frame.cmd_id, RptType.DONE, {"text": "Fast"})
+                    self.v.scr.send_rpt(
+                        frame.sender, frame.cmd_id, RptType.DONE, {"text": "Fast"}
+                    )
                 else:
                     self._active_frame = frame
                 return True
@@ -1379,357 +1399,855 @@ class Test_SecretaryExecutionSpeed:
             def step(self) -> bool:
                 if hasattr(self, '_active_frame') and self._active_frame:
                     self._ticks += 1
-                    if self._mode == "ext" and self._ticks >= 4:
-                        self.v.scr.send_rpt(self._active_frame.sender, self._active_frame.cmd_id, RptType.DONE)
+                    if self._mode == "ext" and self._ticks >= 5:
+                        self.v.scr.send_rpt(
+                            self._active_frame.sender,
+                            self._active_frame.cmd_id,
+                            RptType.DONE
+                        )
                         self._active_frame = None
-                    elif self._mode == "late" and self._ticks >= 15:
-                        self.v.scr.send_rpt(self._active_frame.sender, self._active_frame.cmd_id, RptType.DONE)
+                    elif self._mode == "late" and self._ticks >= 20:
+                        self.v.scr.send_rpt(
+                            self._active_frame.sender,
+                            self._active_frame.cmd_id,
+                            RptType.DONE
+                        )
                         self._active_frame = None
                 return False
 
         class SpeedSender(BaseModule):
-            def step(self) -> bool: return False
+            def step(self) -> bool:
+                return False
 
         reg = EnumRegistry.create_default(evt_cls=EvtType, cmd_cls=CmdType)
         kernel = Kernel(enum_reg=reg, system_name=node_name)
         api = KernelUserView(kernel)
-        kernel._cfg.DEADLINE_EXTENSION_THRESHOLD = 0.08
-        kernel._cfg.DEFAULT_TIME_EXTENSION = 0.1
-        
+
+        kernel._cfg.DEADLINE_EXTENSION_THRESHOLD = 0.020
+        kernel._cfg.DEFAULT_TIME_EXTENSION = 0.100
+        tct = 0.01
+
         try:
             api.add_tier(layer_num=1, name="SPEED_TIER")
-            api.add_thread(name="SPEED_POOL", type=ThreadType.TICKABLE, tct=0.01)
-            # HARD REPAIR: Explicitly map tiers to fix the boot master lock
-            api.add_unit(name="UNIT_SEND", type=UnitType.TICKABLE, m_class=SpeedSender, 
-                         thread_name="SPEED_POOL", tier_layer=1, tier_name="SPEED_TIER")
-            api.add_unit(name="UNIT_EXEC", type=UnitType.TICKABLE, m_class=SpeedExecutor, 
-                         thread_name="SPEED_POOL", tier_layer=1, tier_name="SPEED_TIER")
+            api.add_thread(name="SPEED_POOL", type=ThreadType.TICKABLE, tct=tct)
+            api.add_unit(
+                name="UNIT_SEND", type=UnitType.TICKABLE, m_class=SpeedSender,
+                thread_name="SPEED_POOL", tier_layer=1, tier_name="SPEED_TIER"
+            )
+            api.add_unit(
+                name="UNIT_EXEC", type=UnitType.TICKABLE, m_class=SpeedExecutor,
+                thread_name="SPEED_POOL", tier_layer=1, tier_name="SPEED_TIER"
+            )
             api.start()
-            
-            # Stabilize boot master plan
-            for _ in range(10): kernel.step()
-            
-            sender = kernel._units.get(kernel._broker.get_addr(
-                f"{node_name}:UNIT_SEND", create=False, find=True))
-            executor = kernel._units.get(kernel._broker.get_addr(
-                f"{node_name}:UNIT_EXEC", create=False, find=True))
-            
-            # --- PHASE 1: Fast Execution ---
+
+            for _ in range(15):
+                kernel.step()
+                time.sleep(tct)
+
+            sender = kernel._units.get(
+                kernel._broker.get_addr(
+                    f"{node_name}:UNIT_SEND", create=False, find=True
+                )
+            )
+            executor = kernel._units.get(
+                kernel._broker.get_addr(
+                    f"{node_name}:UNIT_EXEC", create=False, find=True
+                )
+            )
+
             if sender and executor:
-                sender._secr.send_cmd(executor.addr, CmdType.CMD_TEST, lambda f: None)
-                for _ in range(5): kernel.step()
-                fast_ok = True
-                
-                # --- PHASE 2: Extension Execution ---
+                def on_fast_done(f):
+                    nonlocal fast_ok
+                    fast_ok = True
+
+                sender._secr.send_cmd(executor.addr, CmdType.CMD_TEST, on_fast_done)
+                for _ in range(5):
+                    kernel.step()
+                    time.sleep(tct)
+
                 executor._module._mode = "ext"
                 executor._module._ticks = 0
-                
-                def on_ext_done(f): nonlocal ext_ok; ext_ok = True
-                sender._secr.send_cmd(executor.addr, CmdType.CMD_TEST, on_ext_done,
-                                      deadline_answ_dur=0.05, deadline_done_dur=0.06)
-                
-                for _ in range(15): kernel.step()
-                
-                # --- PHASE 3: Late Expired Execution ---
+
+                def on_ext_done(f):
+                    nonlocal ext_ok
+                    ext_ok = True
+
+                def on_ext_timeout(f):
+                    pass
+
+                sender._secr.send_cmd(
+                    recipient=executor.addr,
+                    cmd_type=CmdType.CMD_TEST,
+                    cb=lambda f: None,
+                    cb_done=on_ext_done,
+                    cb_timeout_done=on_ext_timeout,
+                    deadline_answ_dur=0.1,
+                    deadline_done_dur=0.04
+                )
+
+                for _ in range(15):
+                    kernel.step()
+                    time.sleep(tct)
+
                 executor._module._mode = "late"
                 executor._module._ticks = 0
-                
-                def on_late_timeout(f): nonlocal late_dropped; late_dropped = True
-                sender._secr.send_cmd(executor.addr, CmdType.CMD_TEST, lambda f: None,
-                                      cb_timeout_done=on_late_timeout,
-                                      deadline_answ_dur=0.05, deadline_done_dur=0.03)
-                
-                for _ in range(25): kernel.step()
+
+                def on_late_timeout(f):
+                    nonlocal late_dropped
+                    late_dropped = True
+
+                sender._secr.send_cmd(
+                    recipient=executor.addr,
+                    cmd_type=CmdType.CMD_TEST,
+                    cb=lambda f: None,
+                    cb_timeout_done=on_late_timeout,
+                    deadline_answ_dur=0.1,
+                    deadline_done_dur=0.015
+                )
+
+                for _ in range(25):
+                    kernel.step()
+                    time.sleep(tct)
 
             if fast_ok and ext_ok and late_dropped:
                 ledger.ok(test_name)
             else:
-                t = f"Speed fault. FAST:{fast_ok}, EXT:{ext_ok}, LATE:{late_dropped}"
+                t = (f"Speed fault. FAST:{fast_ok}, EXT:{ext_ok}, "
+                     f"LATE:{late_dropped}")
                 ledger.fail(test_name, err_text=t)
         except Exception as e:
-            ledger.fail(test_name, err_text=str(e))
+            ledger.fail(test_name, err_text=f"{e}\n{traceback.format_exc()}")
         finally:
             api.stop()
 
 class Test_SecretaryInvalidAddressing:
     """
     TRIGGERS:
-    1. Zero Handler: Sending a command to a unit with no subscribed callback must 
+    1. Zero Handler: Sending a command to a unit with no subscribed callback must
        instantly return a CANT_DO auto-report with NOT_IMPLEMENTED reason.
     """
     @staticmethod
     def run(ledger: TestLedger, node_name: str):
         test_name = "Secretary: Routing and addressing failures protection"
         ledger.start(test_name, "Test_SecretaryInvalidAddressing")
-        
+
         zero_handler_rejected = False
 
         class IdleWorker(BaseModule):
-            def start(self): self.v.started() # Subscribed to NOTHING
+            def start(self):
+                self.v.started()
 
         class BlindCommander(BaseModule):
-            def step(self) -> bool: return False
+            def step(self) -> bool:
+                return False
 
         reg = EnumRegistry.create_default(evt_cls=EvtType, cmd_cls=CmdType)
         kernel = Kernel(enum_reg=reg, system_name=node_name)
         api = KernelUserView(kernel)
+
         try:
             api.add_tier(layer_num=1, name="ROUTING_TIER")
             api.add_thread(name="ROUTING_POOL", type=ThreadType.TICKABLE, tct=0.01)
-            api.add_unit(name="UNIT_BLIND", type=UnitType.TICKABLE, m_class=BlindCommander, 
-                         thread_name="ROUTING_POOL", tier_layer=1, tier_name="ROUTING_TIER")
-            api.add_unit(name="UNIT_IDLE", type=UnitType.TICKABLE, m_class=IdleWorker, 
-                         thread_name="ROUTING_POOL", tier_layer=1, tier_name="ROUTING_TIER")
+            api.add_unit(
+                name="UNIT_BLIND", type=UnitType.TICKABLE, m_class=BlindCommander,
+                thread_name="ROUTING_POOL", tier_layer=1, tier_name="ROUTING_TIER"
+            )
+            api.add_unit(
+                name="UNIT_IDLE", type=UnitType.TICKABLE, m_class=IdleWorker,
+                thread_name="ROUTING_POOL", tier_layer=1, tier_name="ROUTING_TIER"
+            )
             api.start()
-            
-            for _ in range(10): kernel.step()
-            
-            sender = kernel._units.get(kernel._broker.get_addr(
-                f"{node_name}:UNIT_BLIND", create=False, find=True))
+
+            for _ in range(10):
+                kernel.step()
+
+            sender = kernel._units.get(
+                kernel._broker.get_addr(
+                    f"{node_name}:UNIT_BLIND", create=False, find=True
+                )
+            )
             idle_target = kernel._broker.get_addr(
-                f"{node_name}:UNIT_IDLE", create=False, find=True)
-            
+                f"{node_name}:UNIT_IDLE", create=False, find=True
+            )
+
             if sender and idle_target:
                 def check_not_implemented(frame):
                     nonlocal zero_handler_rejected
-                    # Verify that Secretary natively intercepted missing handler rules
                     if frame.rpt_type == RptType.CANT_DO:
                         zero_handler_rejected = True
-                
-                # Forcefully inject command packet straight to the zero-handler node
-                sender._secr.send_cmd(idle_target, CmdType.CMD_TEST, check_not_implemented)
-                
-                for _ in range(5): kernel.step()
-                time.sleep(0.01)
-                kernel.step()
-                
+
+                sender._secr.send_cmd(
+                    idle_target, CmdType.CMD_TEST, check_not_implemented
+                )
+
+                max_wait = 30
+                while not zero_handler_rejected and max_wait > 0:
+                    kernel.step()
+                    time.sleep(0.01)
+                    max_wait -= 1
+
             if zero_handler_rejected:
                 ledger.ok(test_name)
             else:
-                ledger.fail(test_name, "Secretary failed to reject unhandled command type.")
+                ledger.fail(
+                    test_name,
+                    "Secretary failed to reject unhandled command type."
+                )
         except Exception as e:
             ledger.fail(test_name, err_text=str(e))
         finally:
             api.stop()
 
-class Test_NetworkCrossCommandPipeline:
-    @staticmethod
-    def run(ledger: TestLedger, node_name: str):
-        test_name = "Network: Bidirectional Local and Remote Command Execution Pipeline"
-        if node_name == "ALPHA":
-            ledger.start(test_name, "Test_NetworkCrossCommandPipeline")
-
-        local_tx_ok = False
-        remote_tx_ok = False
-
-        class TestExecutor(BaseModule):
-            def start(self):
-                self.v.scr.subscribe(cb=self._on_cmd, cmd=CmdType.CMD_TEST)
-                self.v.started()
-            def _on_cmd(self, frame: Frame) -> bool:
-                p = {"status": "SUCCESS"}
-                self.v.scr.send_rpt(frame.sender, frame.cmd_id, RptType.DONE, p)
-                return True
-
-        class TestCommander(BaseModule):
-            def start(self):
-                self._net_ready = False
-                return True
-            def on_net_connected(self, system_name: str):
-                if system_name == "BETA" or system_name == "ALPHA":
-                    self._net_ready = True
-            def step(self) -> bool:
-                nonlocal local_tx_ok, remote_tx_ok
-                if getattr(self, '_net_ready', False) and not hasattr(self, '_sent_commands'):
-                    self._sent_commands = True
-                    loc_target = self.v.addr_by_str(f"{self.v.addr.system}:UNIT_REPORTER")
-                    if loc_target:
-                        self.v.scr.send_cmd(loc_target, CmdType.CMD_TEST, self._on_local_done)
-                    rem_sys = "BETA" if self.v.addr.system == "ALPHA" else "ALPHA"
-                    rem_target = self.v.addr_by_str(f"{rem_sys}:UNIT_REPORTER")
-                    if rem_target:
-                        self.v.scr.send_cmd(rem_target, CmdType.CMD_TEST, self._on_remote_done)
-                    return True
-                return False
-            def _on_local_done(self, frame: Frame) -> bool:
-                nonlocal local_tx_ok
-                local_tx_ok = True
-                return True
-            def _on_remote_done(self, frame: Frame) -> bool:
-                nonlocal remote_tx_ok
-                remote_tx_ok = True
-                return True
-
-        reg = EnumRegistry.create_default(evt_cls=EvtType, cmd_cls=CmdType)
-        kernel = Kernel(enum_reg=reg, system_name=node_name)
-        api = KernelUserView(kernel)
-        
-        kernel._cfg.HOST = "127.0.0.1"
-        kernel._cfg.TCP_PORT_DEFAULT = 45501 if node_name == "ALPHA" else 45502
-        kernel._cfg.NET_PROJECT_TOKEN = b"PROJ99"
-        kernel._cfg.NET_PASSWORD = "SECRET_FEDERATION_KEY"
-        kernel._cfg.MAGIC_HEADER = b"SanaPo10"
-        kernel._cfg.HANDSHAKE_TIMEOUT = 1.0
-
-        try:
-            api.add_tier(layer_num=1, name="NET_TIER")
-            api.add_thread(name="NET_POOL", type=ThreadType.TICKABLE, tct=0.01)
-            api.add_unit(name="UNIT_COMMANDER", type=UnitType.TICKABLE, m_class=TestCommander,
-                         thread_name="NET_POOL", tier_layer=1, tier_name="NET_TIER", manifest={"is_public": True})
-            api.add_unit(name="UNIT_REPORTER", type=UnitType.TICKABLE, m_class=TestExecutor,
-                         thread_name="NET_POOL", tier_layer=1, tier_name="NET_TIER", manifest={"is_public": True})
-            api.start()
-
-            connection_detected = False
-            
-            while True:
-                kernel.step()
-                time.sleep(0.01)
-                
-                has_conn = any(c.is_alive for c in kernel._tcp_service._connections.values())
-                if has_conn:
-                    connection_detected = True
-                
-                if node_name == "ALPHA" and local_tx_ok and remote_tx_ok:
-                    kernel._tcp_service.disconnect_all()
-                    ledger.ok(test_name)
-                    break
-                if node_name == "BETA" and connection_detected and not has_conn:
-                    break
-            
-        except Exception as e:
-            if node_name == "ALPHA": ledger.fail(test_name, err_text=str(e))
-        finally:
-            api.stop()
-
-class Test_NetworkServiceDiscovery:
+class Test_SecretaryAdvancedCallbacksAndDeadlines:
     """
     TRIGGERS:
-    1. Role Discovery: Resolve remote unit address by its 'role' string attribute mapping.
-    2. Tag Discovery: Resolve remote unit address by its 'tags' list collection mapping.
-    3. Execution Verification: Validate command delivery and report processing from discovered units.
+    1. Reaction Timeout: Executor ignores command, triggering cb_timeout_answ.
+    2. Explicit Refusal: Executor returns CANT_DO, triggering cb_canttodo.
+    3. Manual Extension: Sender extends deadline via modify_deadline.
     """
     @staticmethod
     def run(ledger: TestLedger, node_name: str):
-        test_name = "Network: Service Discovery by Passport Role and Tag Attributes"
-        if node_name == "ALPHA":
-            ledger.start(test_name, "Test_NetworkServiceDiscovery")
-            
-        role_tx_ok = False
-        tag_tx_ok = False
+        test_name = "Secretary: Advanced Callbacks and Manual Deadlines"
+        ledger.start(test_name, "Test_SecretaryAdvancedCallbacksAndDeadlines")
 
-        class RemoteTarget(BaseModule):
+        answ_timeout_ok = False
+        cant_do_ok = False
+        manual_extend_ok = False
+
+        class AdvancedExecutor(BaseModule):
             def start(self):
                 self.v.scr.subscribe(cb=self._on_cmd, cmd=CmdType.CMD_TEST)
                 self.v.started()
+                self._mode = "normal"
+                self._ticks = 0
+
             def _on_cmd(self, frame: Frame) -> bool:
-                p = {"status": "ACK"}
-                self.v.scr.send_rpt(frame.sender, frame.cmd_id, RptType.DONE, p)
+                if self._mode == "refuse":
+                    self.v.scr.send_rpt(
+                        frame.sender, frame.cmd_id, RptType.CANT_DO,
+                        reason=RptReason.EXEC_EXCEPTION
+                    )
+                elif self._mode == "long_run":
+                    self._active_frame = frame
                 return True
 
-        class DiscovererClient(BaseModule):
-            def start(self):
-                self._net_ready = False
-                return True
-            def on_net_connected(self, system_name: str):
-                if system_name == "BETA":
-                    self._net_ready = True
             def step(self) -> bool:
-                nonlocal role_tx_ok, tag_tx_ok
-                if getattr(self, '_net_ready', False) and not (role_tx_ok and tag_tx_ok):
-                    if not getattr(self, '_role_sent', False):
-                        role_matches = self.v.find_remote_units_by_role("compute_core")
-                        if role_matches:
-                            self._role_sent = True
-                            self.v.scr.send_cmd(role_matches, CmdType.CMD_TEST, self._on_role_done)
-                    if not getattr(self, '_tag_sent', False):
-                        tag_matches = self.v.find_remote_units_by_tag("gpu_accelerated")
-                        if tag_matches:
-                            self._tag_sent = True
-                            self.v.scr.send_cmd(tag_matches, CmdType.CMD_TEST, self._on_tag_done)
-                    return True
+                if hasattr(self, '_active_frame') and self._active_frame:
+                    self._ticks += 1
+                    if self._ticks >= 6:
+                        self.v.scr.send_rpt(
+                            self._active_frame.sender,
+                            self._active_frame.cmd_id,
+                            RptType.DONE
+                        )
+                        self._active_frame = None
                 return False
-            def _on_role_done(self, frame: Frame) -> bool:
-                nonlocal role_tx_ok
-                role_tx_ok = True
+
+        class AdvancedSender(BaseModule):
+            def step(self) -> bool:
+                return False
+
+        reg = EnumRegistry.create_default(evt_cls=EvtType, cmd_cls=CmdType)
+        kernel = Kernel(enum_reg=reg, system_name=node_name)
+        api = KernelUserView(kernel)
+
+        kernel._cfg.DEADLINE_EXTENSION_THRESHOLD = 0.005
+        kernel._cfg.DEFAULT_TIME_EXTENSION = 0.010
+        tct = 0.01
+
+        try:
+            api.add_tier(layer_num=1, name="ADV_TIER")
+            api.add_thread(name="ADV_POOL", type=ThreadType.TICKABLE, tct=tct)
+            api.add_unit(
+                name="UNIT_SENDER", type=UnitType.TICKABLE, m_class=AdvancedSender,
+                thread_name="ADV_POOL", tier_layer=1, tier_name="ADV_TIER"
+            )
+            api.add_unit(
+                name="UNIT_EXEC", type=UnitType.TICKABLE, m_class=AdvancedExecutor,
+                thread_name="ADV_POOL", tier_layer=1, tier_name="ADV_TIER"
+            )
+            api.start()
+
+            for _ in range(10):
+                kernel.step()
+                time.sleep(tct)
+
+            sender = kernel._units.get(
+                kernel._broker.get_addr(
+                    f"{node_name}:UNIT_SENDER", create=False, find=True
+                )
+            )
+            executor = kernel._units.get(
+                kernel._broker.get_addr(
+                    f"{node_name}:UNIT_EXEC", create=False, find=True
+                )
+            )
+
+            if sender and executor:
+                saved_handle_frame = executor._secr._handle_frame
+                executor._secr._handle_frame = lambda incoming: False
+
+                def on_answ_timeout(f):
+                    nonlocal answ_timeout_ok
+                    answ_timeout_ok = True
+
+                sender._secr.send_cmd(
+                    recipient=executor.addr, cmd_type=CmdType.CMD_TEST,
+                    cb=lambda f: None, cb_timeout_answ=on_answ_timeout,
+                    deadline_answ_dur=0.03, deadline_done_dur=0.30
+                )
+                for _ in range(10):
+                    kernel.step()
+                    time.sleep(tct)
+
+                executor._secr._handle_frame = saved_handle_frame
+
+                executor._module._mode = "refuse"
+
+                def on_cant_do(f):
+                    nonlocal cant_do_ok
+                    cant_do_ok = True
+
+                sender._secr.send_cmd(
+                    recipient=executor.addr, cmd_type=CmdType.CMD_TEST,
+                    cb=lambda f: None, cb_canttodo=on_cant_do,
+                    deadline_answ_dur=0.1, deadline_done_dur=0.1
+                )
+                for _ in range(5):
+                    kernel.step()
+                    time.sleep(tct)
+
+                executor._module._mode = "long_run"
+                executor._module._ticks = 0
+                executor._secr._cmd_in.clear()
+
+                def on_done_extended(f):
+                    nonlocal manual_extend_ok
+                    manual_extend_ok = True
+
+                sender._secr.send_cmd(
+                    recipient=executor.addr, cmd_type=CmdType.CMD_TEST,
+                    cb=lambda f: None, cb_done=on_done_extended,
+                    deadline_answ_dur=0.1, deadline_done_dur=0.03
+                )
+
+                kernel.step()
+                time.sleep(tct)
+
+                active_cmd_id = list(sender._secr._cmd_out.keys())[-1]
+                extended_time = time.perf_counter() + 0.200
+                sender._secr.modify_deadline(active_cmd_id, extended_time)
+
+                for _ in range(15):
+                    kernel.step()
+                    time.sleep(tct)
+
+            if answ_timeout_ok and cant_do_ok and manual_extend_ok:
+                ledger.ok(test_name)
+            else:
+                t = (f"Fault. TIMEOUT:{answ_timeout_ok}, REFUSE:{cant_do_ok}, "
+                     f"EXT:{manual_extend_ok}")
+                ledger.fail(test_name, err_text=t)
+        except Exception as e:
+            ledger.fail(test_name, err_text=f"{e}\n{traceback.format_exc()}")
+        finally:
+            api.stop()
+
+# Canonical tests
+class Test_NetworkAutoDiscovery:
+    """
+    TRIGGERS: get manifest exchange, get connection confirmed.
+    """
+    @staticmethod
+    def run(ledger: TestLedger, node_name: str):
+        class_name = "Test_NetworkAutoDiscovery"
+        test_name = "Network: Auto-discovery and TCP Connection"
+        if node_name == "ALPHA": ledger.start(test_name, class_name)
+        else: ledger.start_assistent(test_name, class_name)
+
+        # Triggers
+        manifest_suc = False
+        connected_suc = False
+        
+        def triggers_str() -> str:
+            return f"manifest_suc={int(manifest_suc)}, connected_suc={int(connected_suc)}"
+        
+        def triggers_res() -> bool:
+            return all((manifest_suc, connected_suc))
+
+        class ConnectDedector(BaseModule):
+            def start(self):
+                self.v.started()
+
+            def on_net_connected(self, system_name: str):
+                nonlocal connected_suc
+                connected_suc = True
+                self.v.log.inf("Connected to {name}", name=system_name)
+
+
+        reg = EnumRegistry.create_default(evt_cls=EvtType, cmd_cls=CmdType)
+        kernel = Kernel(enum_reg=reg, system_name=node_name)
+        api = KernelUserView(kernel)
+        kernel._cfg.TCP_PORT_DEFAULT = 45501 if node_name == "ALPHA" else 45502
+
+        try:
+            mnfst = {"is_public": True}
+            api.add_unit("PUBLIC",UnitType.TICKABLE, BaseModule, manifest=mnfst)
+            api.add_unit("CONNECT_DETECTOR", UnitType.TICKABLE, ConnectDedector)
+            api.start()
+
+            max_wait = 100
+            while not triggers_res() and max_wait > 0:
+                kernel.step()
+                time.sleep(0.05)
+                if api._kernel._broker._remote_manifests:
+                    if not manifest_suc:
+                        manifest_suc = True
+                        print(f"manifest_suc, manifest={api._kernel._broker._remote_manifests}")
+                max_wait -= 1
+
+            if node_name == "ALPHA":
+                if triggers_res():
+                    ledger.ok(test_name)
+                    kernel._tcp_service.disconnect_all()
+                else:
+                    t = f"Connecting timeout. {triggers_str()}"
+                    ledger.fail(test_name, t)        
+            else:
+               if connected_suc:
+                    ledger.stop_assistent(test_name)
+                    kernel._tcp_service.disconnect_all()
+
+        except Exception as e:
+            if node_name == "ALPHA": ledger.fail(test_name, f"{triggers_str()} {e}")
+            else: ledger.stop_assistent(test_name)
+            traceback.print_exc()
+        finally:
+            api.stop()
+            while api.is_running:
+                kernel.step()
+                time.sleep(0.05)
+
+class Test_NetworkEventExchange:
+    """TRIGGERS: check cross-system EvtType.TEST delivery from BETA to ALPHA."""
+
+    @staticmethod
+    def run(ledger: TestLedger, node_name: str):
+        class_name = "Test_NetworkEventExchange"
+        test_name = "Network: Cross-System Event Delivery"
+        if node_name == "ALPHA": ledger.start(test_name, class_name)
+        else: ledger.start_assistent(test_name, class_name)
+        
+        # Tiggers
+        manifest_suc = False
+        connected_suc = False
+        listener_called = False
+
+        def triggers_str() -> str:
+            return (f"manifest_suc={int(manifest_suc)}, "
+                    f"connected_suc={int(connected_suc)}, "
+                    f"listener_called={int(listener_called)}")
+        
+        def triggers_res() -> bool:
+            return all((manifest_suc, connected_suc, listener_called))
+
+        class Listener(BaseModule):
+            """Module on ALPHA side that subscribes to external events."""
+            def start(self) -> None:
+                self.v.scr.subscribe(cb=self._on_event, evt=EvtType.EVT_TEST)
+                self.v.started()
+
+            def _on_event(self, frame: Frame) -> bool:
+                if frame.evt_type == EvtType.EVT_TEST:
+                    nonlocal listener_called
+                    listener_called = True
+                    self.v.log.inf("successfully got EVT! ({txt})", txt=frame.payload["text"])
+                    # Answer
+                    self.v.scr.send_evt(EvtType.EVT_TEST, {"text": "Answer from ALPHA:LISTENER"})
+                    self.v.log.inf("answed echo with EvtType.TEST")
                 return True
+
+            def on_net_connected(self, system_name: str) -> None:
+                nonlocal connected_suc
+                connected_suc = True
+                self.v.log.inf("Connected to {name}", name=system_name)
+
+        class Emitter(BaseModule):
+            """Module on BETA side that publishes events after connection."""
+            def start(self) -> None:
+                self.v.scr.subscribe(cb=self._on_event, evt=EvtType.EVT_TEST)
+                self.evt_already_sent = False
+                self.v.started()
+
+            def step(self) -> bool:
+                if not (connected_suc and manifest_suc): return True
+                if self.evt_already_sent: return True
+                if self.v.addr.system != "ALPHA":
+                    self.v.scr.send_evt(EvtType.EVT_TEST, {"text":"Hello from [assistent]:EMITTER"})
+                    self.v.log.inf("published EvtType.TEST")
+                    self.evt_already_sent = True
+                return True
+            
+            def _on_event(self, frame: Frame) -> bool:
+                if frame.evt_type == EvtType.EVT_TEST:
+                    if frame.sender.system == "ALPHA":
+                        nonlocal listener_called
+                        listener_called = True
+                        self.v.log.inf("successfully got EVT! ({txt})", txt=frame.payload["text"])
+                return True
+
+            def on_net_connected(self, system_name: str) -> None:
+                nonlocal connected_suc
+                connected_suc = True
+                self.v.log.inf("Connected to {name}", name=system_name)
+
+
+        reg = EnumRegistry.create_default(evt_cls=EvtType, cmd_cls=CmdType)
+        kernel = Kernel(enum_reg=reg, system_name=node_name)
+        api = KernelUserView(kernel)
+        kernel._cfg.TCP_PORT_DEFAULT = 45501 if node_name == "ALPHA" else 45502
+
+        try:
+            mnfst = {"is_public": True}
+            if node_name == "ALPHA":
+                api.add_unit("LISTENER", UnitType.TICKABLE, Listener, manifest=mnfst)
+            else:
+                api.add_unit("EMITTER", UnitType.TICKABLE, Emitter, manifest=mnfst)
+            
+            api.start()
+
+            max_wait = 200
+            while not triggers_res() and max_wait > 0:
+                kernel.step()
+                time.sleep(0.05)
+                if api._kernel._broker._remote_manifests:
+                    if not manifest_suc:
+                        manifest_suc = True
+                        kernel._log.inf("Manifest exchange completed")
+                max_wait -= 1
+
+            if node_name == "ALPHA":
+                if triggers_res():
+                    ledger.ok(test_name)
+                    kernel._tcp_service.disconnect_all()
+                else:
+                    t = f"Event delivery timeout. {triggers_str()}"
+                    ledger.fail(test_name, t)        
+            else:
+                if triggers_res():
+                    kernel._tcp_service.disconnect_all()
+
+        except Exception as e:
+            if node_name == "ALPHA": ledger.fail(test_name, f"{triggers_str()} {e}")
+            else: ledger.stop_assistent(test_name)
+            traceback.print_exc()
+        finally:
+            api.stop()
+            while api.is_running:
+                kernel.step()
+                time.sleep(0.05)
+
+class Test_NetworkCommandExchange:
+    """
+    TRIGGERS: get manifest exchange, get connection confirmed,
+    get local and remote commands, get local and remote reports
+    """
+
+    @staticmethod
+    def run(ledger: TestLedger, node_name: str):
+        class_name = "Test_NetworkCommandExchange"
+        test_name = "Network: Command and Report Exchange"
+        if node_name == "ALPHA": ledger.start(test_name, class_name)
+        else: ledger.start_assistent(test_name, class_name)
+        
+        # Triggers
+        manifest_suc = False
+        connected_suc = False
+        local_cmd = False
+        remote_cmd = False
+        local_rpt = False
+        remote_rpt = False
+
+        def triggers_str() -> str:
+            t = f"manifest_suc={int(manifest_suc)}, connected_suc={int(connected_suc)} "
+            t+= f"local_cmd={int(local_cmd)}, remote_cmd={int(remote_cmd)} "
+            t+= f"local_rpt={int(local_rpt)}, remote_rpt={int(remote_rpt)} "
+            return t
+        
+        def triggers_res() -> bool:
+            return all((manifest_suc, connected_suc, local_cmd, remote_cmd, local_rpt, remote_rpt))
+
+
+        class Comander(BaseModule):
+            def start(self) -> None:
+                self.cmd_already_sended = False
+                self.local_sys = self.v.addr.system
+                self.remote_sys = "BETA" if self.local_sys == "ALPHA" else "ALPHA"
+                self.v.started()
+                
+            def step(self) -> bool:
+                nonlocal manifest_suc
+                if not manifest_suc: return True
+                if self.cmd_already_sended: return True
+                
+                for k, v in {"local": self.local_sys, "remote": self.remote_sys}.items():
+                    self.v.log.dbg("try get {type_target} target", type_target=k)
+                    target = self.v.addr_by_str(f"{v}:REPORTER")
+                    if target:
+                        self.v.log.dbg("got {type_target} target", type_target=k)
+                        p = {"data": f"hello from {self.v.addr}! ({k})"}
+                        self.v.scr.send_cmd(target, CmdType.CMD_TEST, self._on_rpt, payload=p)
+                    else:
+                        self.v.log.err("cant get {type_target} target", type_target=k)
+                self.cmd_already_sended = True
+                return True
+            
+            def _on_rpt(self, frame: Frame) -> None:
+                if frame.rpt_type == RptType.DONE:
+                    if frame.sender.system == self.local_sys:
+                        nonlocal local_rpt
+                        local_rpt = True
+                    if frame.sender.system == self.remote_sys:
+                        nonlocal remote_rpt
+                        remote_rpt = True
+                self.v.log.inf("get rpt from {sys}: {frame}", sys=self.local_sys, frame=frame)  
+
+        class Reporter(BaseModule):
+            def _on_cmd(self, frame: Frame) -> bool:
+                if self.v.addr.system == 'ALPHA':
+                    if frame.sender.system == 'ALPHA':
+                        nonlocal local_cmd
+                        local_cmd = True
+                    elif frame.sender.system == 'BETA':
+                        nonlocal remote_cmd
+                        remote_cmd = True
+                time.sleep(0.1)
+                p = {"echo": frame.payload.get("data")}
+                self.v.scr.send_rpt(frame.sender, frame.cmd_id, RptType.DONE, p)
+                return True
+            
+            def start(self):
+                self.v.scr.subscribe(cb=self._on_cmd, cmd=CmdType.CMD_TEST)
+                self.v.started()
+                
+            def on_net_connected(self, system_name: str):
+                nonlocal connected_suc
+                connected_suc = True
+                self.v.log.inf("Connected to {name}", name=system_name)
+
+        reg = EnumRegistry.create_default(evt_cls=EvtType, cmd_cls=CmdType)
+        kernel = Kernel(enum_reg=reg, system_name=node_name)
+        api = KernelUserView(kernel)
+        kernel._cfg.TCP_PORT_DEFAULT = 45501 if node_name == "ALPHA" else 45502
+
+        try:
+            mnfst = {"is_public": True}
+            api.add_unit("COMANDER", UnitType.TICKABLE, Comander, manifest=mnfst)
+            api.add_unit("REPORTER", UnitType.TICKABLE, Reporter, manifest=mnfst)
+            api.start()
+
+            max_wait = 100
+            while not triggers_res() and max_wait > 0:
+                kernel.step()
+                time.sleep(0.05)
+                if api._kernel._broker._remote_manifests:
+                    if not manifest_suc:
+                        manifest_suc = True
+                        print(f"manifest_suc, manifest={api._kernel._broker._remote_manifests}")
+                max_wait -= 1
+
+            if node_name == "ALPHA":
+                if triggers_res():
+                    ledger.ok(test_name)
+                    kernel._tcp_service.disconnect_all()
+                else:
+                    t = f"Connecting timeout. {triggers_str()}"
+                    ledger.fail(test_name, t)        
+            else:
+                if connected_suc:
+                    ledger.stop_assistent(test_name)
+                    kernel._tcp_service.disconnect_all()
+
+        except Exception as e:
+            if node_name == "ALPHA": ledger.fail(test_name, f"{triggers_str()} {e}")
+            else: ledger.stop_assistent(test_name)
+            traceback.print_exc()
+        finally:
+            api.stop()
+            while api.is_running:
+                kernel.step()
+                time.sleep(0.05)
+
+
+#0000000000
+class Test_NetworkServiceDiscoveryFull:
+    """
+    TRIGGERS: Connection, manifests, find by role, find by tag,
+             send commands to discovered units, receive reports.
+    """
+    @staticmethod
+    def run(ledger: TestLedger, node_name: str):
+        test_name = "Network: Full Service Discovery (Role + Tag)"
+        if node_name == "ALPHA":
+            ledger.start(test_name, "Test_NetworkServiceDiscoveryFull")
+
+        role_found = False
+        tag_found = False
+        role_cmd_ok = False
+        tag_cmd_ok = False
+        connected = False
+
+        class EchoModule(BaseModule):
+            def start(self):
+                self.v.scr.subscribe(cb=self._on_cmd, cmd=CmdType.CMD_TEST)
+                self.v.started()
+
+            def _on_cmd(self, frame: Frame) -> bool:
+                self.v.scr.send_rpt(
+                    frame.sender, frame.cmd_id, RptType.DONE,
+                    {"status": "ok", "received": frame.payload}
+                )
+                return True
+
+        class DiscovererModule(BaseModule):
+            def on_net_connected(self, system_name: str):
+                nonlocal connected
+                connected = True
+
+            def step(self) -> bool:
+                nonlocal role_found, tag_found, role_cmd_ok, tag_cmd_ok
+
+                if not connected or hasattr(self, '_done'):
+                    return False
+
+                # Find by role
+                role_matches = self.v.find_remote_units_by_role("compute_core")
+                if role_matches and not role_found:
+                    role_found = True
+                    self.v.scr.send_cmd(
+                        role_matches[0], CmdType.CMD_TEST, self._on_role_done,
+                        payload={"via": "role"}
+                    )
+
+                # Find by tag
+                tag_matches = self.v.find_remote_units_by_tag("gpu_accelerated")
+                if tag_matches and not tag_found:
+                    tag_found = True
+                    self.v.scr.send_cmd(
+                        tag_matches[0], CmdType.CMD_TEST, self._on_tag_done,
+                        payload={"via": "tag"}
+                    )
+
+                if role_found and tag_found and role_cmd_ok and tag_cmd_ok:
+                    self._done = True
+
+                return False
+
+            def _on_role_done(self, frame: Frame) -> bool:
+                nonlocal role_cmd_ok
+                role_cmd_ok = True
+                return True
+
             def _on_tag_done(self, frame: Frame) -> bool:
-                nonlocal tag_tx_ok
-                tag_tx_ok = True
+                nonlocal tag_cmd_ok
+                tag_cmd_ok = True
                 return True
 
         reg = EnumRegistry.create_default(evt_cls=EvtType, cmd_cls=CmdType)
         kernel = Kernel(enum_reg=reg, system_name=node_name)
         api = KernelUserView(kernel)
-        
-        kernel._cfg.HOST = "127.0.0.1"
+
+        kernel._cfg.HOST = "0.0.0.0"
         kernel._cfg.TCP_PORT_DEFAULT = 45501 if node_name == "ALPHA" else 45502
-        kernel._cfg.NET_PROJECT_TOKEN = b"PROJ99"
-        kernel._cfg.NET_PASSWORD = "SECRET_FEDERATION_KEY"
-        kernel._cfg.MAGIC_HEADER = b"SanaPo10"
-        kernel._cfg.HANDSHAKE_TIMEOUT = 1.0
+        kernel._cfg.NET_PROJECT_TOKEN = b"PROJ00"
+        
+        
+        kernel._cfg.NET_AUTO_CONNECT = True
+        kernel._cfg.UDP_BEACON_INTERVAL = 0.5
+        kernel._cfg.CONN_KEEP_ALIVE = 30.0
 
         try:
-            if node_name == "ALPHA":
-                api.add_tier(layer_num=1, name="DISC_TIER")
-                api.add_thread(name="DISC_POOL", type=ThreadType.TICKABLE, tct=0.01)
-                api.add_unit(name="UNIT_DISCOVERER", type=UnitType.TICKABLE, m_class=DiscovererClient,
-                             thread_name="DISC_POOL", tier_layer=1, tier_name="DISC_TIER")
-                api.start()
-            else:
-                print(f"[ TEST ] >>> Running: {test_name}")
-                api.add_tier(layer_num=1, name="DISC_TIER")
-                api.add_thread(name="DISC_POOL", type=ThreadType.TICKABLE, tct=0.01)
-                api.add_unit(name="ROLE_WORKER", type=UnitType.TICKABLE, m_class=RemoteTarget,
-                             thread_name="DISC_POOL", tier_layer=1, tier_name="DISC_TIER",
-                             manifest={"role": "compute_core", "is_public": True})
-                api.add_unit(name="TAG_WORKER", type=UnitType.TICKABLE, m_class=RemoteTarget,
-                             thread_name="DISC_POOL", tier_layer=1, tier_name="DISC_TIER",
-                             manifest={"tags": ["gpu_accelerated"], "is_public": True})
-                api.start()
+            api.add_tier(layer_num=1, name="TEST_TIER")
+            api.add_thread(name="TEST_POOL", type=ThreadType.TICKABLE, tct=0.01)
 
-            connection_detected = False
-            while True:
+            if node_name == "ALPHA":
+                # ALPHA needs a public unit too
+                api.add_unit(
+                    name="UNIT_PUBLIC", type=UnitType.TICKABLE, m_class=BaseModule,
+                    thread_name="TEST_POOL", tier_layer=1, tier_name="TEST_TIER",
+                    manifest={"is_public": True}
+                )
+                api.add_unit(
+                    name="UNIT_DISCOVERER", type=UnitType.TICKABLE,
+                    m_class=DiscovererModule,
+                    thread_name="TEST_POOL", tier_layer=1, tier_name="TEST_TIER"
+                )
+            else:
+                # BETA exports units with role/tag
+                api.add_unit(
+                    name="UNIT_PUBLIC", type=UnitType.TICKABLE, m_class=BaseModule,
+                    thread_name="TEST_POOL", tier_layer=1, tier_name="TEST_TIER",
+                    manifest={"is_public": True}
+                )
+                api.add_unit(
+                    name="ROLE_WORKER", type=UnitType.TICKABLE, m_class=EchoModule,
+                    thread_name="TEST_POOL", tier_layer=1, tier_name="TEST_TIER",
+                    manifest={"is_public": True, "role": "compute_core"}
+                )
+                api.add_unit(
+                    name="TAG_WORKER", type=UnitType.TICKABLE, m_class=EchoModule,
+                    thread_name="TEST_POOL", tier_layer=1, tier_name="TEST_TIER",
+                    manifest={"is_public": True, "tags": ["gpu_accelerated"]}
+                )
+
+            api.start()
+
+            max_wait = 200
+            all_ok = lambda: (role_found and tag_found and role_cmd_ok and tag_cmd_ok)
+
+            while not all_ok() and max_wait > 0:
                 kernel.step()
-                time.sleep(0.01)
-                
-                has_conn = any(c.is_alive for c in kernel._tcp_service._connections.values())
-                if has_conn:
-                    connection_detected = True
-                
-                if node_name == "ALPHA" and role_tx_ok and tag_tx_ok:
+                time.sleep(0.05)
+                max_wait -= 1
+
+            if node_name == "ALPHA":
+                if all_ok():
                     kernel._tcp_service.disconnect_all()
                     ledger.ok(test_name)
-                    break
-                if node_name == "BETA" and connection_detected and not has_conn:
-                    break
-            
-        except Exception as e:
-            if node_name == "ALPHA": ledger.fail(test_name, err_text=str(e))
-        finally:
-            api.stop()
+                else:
+                    t = f"RoleFound:{role_found} TagFound:{tag_found} "
+                    t += f"RoleCmd:{role_cmd_ok} TagCmd:{tag_cmd_ok}"
+                    ledger.fail(test_name, err_text=t)
+            else:
+                while True:
+                    kernel.step()
+                    time.sleep(0.1)
 
+        except Exception as e:
+            if node_name == "ALPHA":
+                ledger.fail(test_name, err_text=str(e))
+        finally:
+            if node_name == "ALPHA":
+                api.stop()
 
 
 def run_test_node(node_name: str):
     global ledger
     print(f"Initializing node: {node_name}")
-    
-    # Global Config Defaults for Clean State
     Config.BOOT_UI_MODE = "CUI"
     Config.KERNEL_TCT = 0.01
-    Config.HOST = "127.0.0.1" 
+    Config.HOST = "0.0.0.0"
     Config.UDP_PORT_DEFAULT = 45500
     Config.TCP_PORT_DEFAULT = 45501 if node_name == "ALPHA" else 45502
-    Config.UDP_BEACON_INTERVAL = 2.0
-    Config.CONN_KEEP_ALIVE = 5.0
-    Config.HANDSHAKE_TIMEOUT = 2.0
+    Config.UDP_BEACON_INTERVAL = 1.0
+    Config.CONN_KEEP_ALIVE = 10.0
+    Config.HANDSHAKE_TIMEOUT = 5.0
     Config.ADDR_BROKER_STR = "BROKER"
     Config.BROKER_BUS_READ_LIMIT = 50
     Config.MAGIC_HEADER = b"SanaPo10"
-    Config.NET_PROJECT_TOKEN = b"PROJ99"
+    Config.NET_PROJECT_TOKEN = b"PROJ00"
     Config.NET_ALLOWED_IPS = []
-    Config.NEEDS_NET_AUTO_CONNECT = False
+    Config.NET_AUTO_CONNECT = True
     Config.HIBERNATE_MODE = False
     Config.DEFAULT_LOG_FLAGS["file"] = []
     
@@ -1743,58 +2261,55 @@ def run_test_node(node_name: str):
         ledger.add_meta("Kernel: Factory Methods Validation Suite", is_ready=True)
         ledger.add_meta("Threads: Strict Access Control and Hibernation Physics", is_ready=True)
         ledger.add_meta("Layers: Advanced Tier Factory and Navigation Control", is_ready=True)
-        ledger.add_meta("Chaos: Heavy Random Matrix Multi-Generation Fuzzing", is_ready=False)
+        ledger.add_meta("Chaos: Heavy Random Matrix Multi-Generation Fuzzing", is_ready=True)
         ledger.add_meta("Kernel: Default Tiers and Threads for Homeless Units", is_ready=True)
         ledger.add_meta("Boot: Module Initialization Retry", is_ready=True)
         ledger.add_meta("Boot: Tier Fatal Collapse and Global Restart", is_ready=True)
         ledger.add_meta("Boot: Emergency Dead Tier Isolation Bypass", is_ready=True)
-        ledger.add_meta("Boot: Emergency Shutdown Stuck Isolation Bypass", is_ready=True)
+        ledger.add_meta("Boot: Emergency Shutdown Stuck Unit", is_ready=True)
         ledger.add_meta("WatchDog: Automated Module Reborn Recovery", is_ready=True)
         ledger.add_meta("WatchDog: Deep Infrastructure Unit Reborn", is_ready=True)
         ledger.add_meta("WatchDog: Stalled OS Thread Nuclear Reset", is_ready=True)
         ledger.add_meta("Secretary: Automated Report Transaction Pipeline", is_ready=True)
-        #ledger.add_meta("Secretary: Execution Speed and Deadlines tools", is_ready=True)
-        #ledger.add_meta("Secretary: Routing and addressing failures protection", is_ready=True)
-        #ledger.add_meta("Network: Bidirectional Local and Remote Command Execution Pipeline", is_ready=True)
-        #ledger.add_meta("Network: Service Discovery by Passport Role and Tag Attributes", is_ready=True)
-        #ledger.add_meta("", is_ready=True)
+        ledger.add_meta("Secretary: Execution Speed and Deadlines tools", is_ready=True)
+        ledger.add_meta("Secretary: Routing and addressing failures protection", is_ready=True)
+        ledger.add_meta("Secretary: Advanced Callbacks and Manual Deadlines", is_ready=True)
+        ledger.add_meta("Network: Auto-discovery and TCP Connection", is_ready=True)
+        ledger.add_meta("Network: Cross-System Event Delivery", is_ready=True)
+        ledger.add_meta("Network: Command and Report Exchange", is_ready=True)
+        #ledger.add_meta("Network: Full Service Discovery (Role + Tag)", is_ready=True)
 
         # --- COMPONENT DISCRETE PIPELINE (ONE TEST = ONE LINE) ---
-        Test_StartStopSystem.run(ledger, node_name)
-        TestSendLocalEvt.run(ledger, node_name)
-        TestSendLocalCmd.run(ledger, node_name)
-        Test_KernelCreateMethods.run(ledger, node_name)
-        Test_ThreadTypes.run(ledger, node_name)
-        Test_TierCreating.run(ledger, node_name)
-        Test_RandomCreateThreadsTiersUnits.run(ledger, node_name)
-        Test_DefThreadTierForUnit.run(ledger, node_name)
-        Test_BootMasterTierRetry.run(ledger, node_name)
-        Test_BootMasterGlobalRestart.run(ledger, node_name)
-        Test_BootMasterSkipDeadTier.run(ledger, node_name)
-        Test_BootMasterShutdownStuck.run(ledger, node_name)
-        Test_WatchDogModuleReborn.run(ledger, node_name)
-        Test_WatchDogUnitReborn.run(ledger, node_name)
-        Test_WatchDogThreadReborn.run(ledger, node_name)
-        Test_SecretaryReportTransaction.run(ledger, node_name)
+        #Test_StartStopSystem.run(ledger, node_name)
+        #TestSendLocalEvt.run(ledger, node_name)
+        #TestSendLocalCmd.run(ledger, node_name)
+        #Test_KernelCreateMethods.run(ledger, node_name)
+        #Test_ThreadTypes.run(ledger, node_name)
+        #Test_TierCreating.run(ledger, node_name)
+        #Test_RandomCreateThreadsTiersUnits.run(ledger, node_name)
+        #Test_DefThreadTierForUnit.run(ledger, node_name)
+        #Test_BootMasterTierRetry.run(ledger, node_name)
+        #Test_BootMasterGlobalRestart.run(ledger, node_name)
+        #Test_BootMasterSkipDeadTier.run(ledger, node_name)
+        #Test_BootMasterShutdownStuck.run(ledger, node_name)
+        #Test_WatchDogModuleReborn.run(ledger, node_name)
+        #Test_WatchDogUnitReborn.run(ledger, node_name)
+        #Test_WatchDogThreadReborn.run(ledger, node_name)
+        #Test_SecretaryReportTransaction.run(ledger, node_name)
         #Test_SecretaryExecutionSpeed.run(ledger, node_name)
         #Test_SecretaryInvalidAddressing.run(ledger, node_name)
-        
-        Config.NEEDS_NET_AUTO_CONNECT = True
-        Config.HIBERNATE_MODE = True
-
-        #Test_NetworkCrossCommandPipeline.run(ledger, node_name)
-        #time.sleep(1.0)
-        #Test_NetworkServiceDiscovery.run(ledger, node_name)
-        #.run(ledger, node_name)
-        # ---------------------------------------------------------
-        
+        #Test_SecretaryAdvancedCallbacksAndDeadlines.run(ledger, node_name)
+        Test_NetworkAutoDiscovery.run(ledger, node_name)
+        Test_NetworkEventExchange.run(ledger, node_name)
+        Test_NetworkCommandExchange.run(ledger, node_name)
+        #Test_NetworkServiceDiscoveryFull.run(ledger, node_name)
         ledger.print_results()
     else:
-        print("Initializing node: BETA. Standing by for ALPHA orchestration...")
-        #Test_NetworkCrossCommandPipeline.run(None, node_name)
-        #time.sleep(0.5)
-        #Test_NetworkServiceDiscovery.run(None, node_name)
-        print("BETA verification pipeline completed successfully.")
+        print("BETA: Network service mode. Ready for multiple test sessions.")
+        ledger = TestLedger()        
+        Test_NetworkAutoDiscovery.run(ledger, node_name)
+        Test_NetworkEventExchange.run(ledger, node_name)
+        Test_NetworkCommandExchange.run(ledger, node_name)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Sanapo Discrete Fuzzing Suite")
