@@ -83,7 +83,7 @@ class Secretary:
             SysType.U_REBORN: self._unit.restart_module,
             SysType.U_MUTATE: self._unit.mutate,
             # TODO in v2: Should the secretary call non-network units?
-            SysType.NET_CONNECTED: self._unit.on_net_connected,
+            SysType.NET_READY: self._unit.on_net_ready,
             SysType.NET_DISCONNECTED: self._unit.on_net_disconnected,
         }
 
@@ -459,7 +459,6 @@ class Secretary:
                                   rpt_type=rtype, cmd_id=cmd_id, recipient=self._addr)
                 except ValueError as e:
                     self._logger.err("SECR: Cant create Frame for timeout-cb")
-                print(f"unit={self._addr} self._cmd_out={self._cmd_out}, cmd_id={cmd_id}")
                 if frame:
                     if now > info["deadline_answ"]:
                         info["cb_timeout_answ"](frame)
@@ -467,16 +466,14 @@ class Secretary:
                         # Save expired ID to history buffer
                         self._cmd_expired.append(cmd_id)
                         if len(self._cmd_expired) > self._config.CMD_HISTORY_LIMIT:
-                            self._cmd_expired.pop(0)
-                        print("pop1")
+                            self._cmd_expired.pop(0, None)
                     elif now > info["deadline_done"]:
                         info["cb_timeout_done"](frame)
                         self._cmd_out.pop(cmd_id)
                         # Save expired ID to history buffer
                         self._cmd_expired.append(cmd_id)
                         if len(self._cmd_expired) > self._config.CMD_HISTORY_LIMIT:
-                            self._cmd_expired.pop(0)
-                        print("pop2")
+                            self._cmd_expired.pop(0, None)
 
         # Automatic deadline extension (when we are the Executor).
         # If remaining time is below threshold - automatically request more time.

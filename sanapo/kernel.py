@@ -786,12 +786,13 @@ class Kernel:
     
     def on_net_connected(self, frame: Frame) -> None:
         remote_system = frame.payload.get("sys_name")
-        self._log.inf("Kernel: Federation link confirmed with node '{s}'. Preparation complete.", s=remote_system)
-        self._broker.broadcast_sys_message(SysType.NET_CONNECTED, {"sys_name": remote_system})
+        self._broker._federation_ready[remote_system] = False
+        self._log.inf("Kernel: Federation link confirmed with system '{s}'", s=remote_system)
 
     def on_net_disconnected(self, frame: Frame) -> None:
         remote_system = frame.payload.get("sys_name")
-        self._log.wrn("Kernel: Federation link with node '{s}' lost. Cleaning up topology.", 
+        self._broker._federation_ready.pop(remote_system, None)
+        self._log.wrn("Kernel: Federation link with system '{s}' lost. Cleaning up topology.", 
                       s=remote_system)
         
         # 1. Remove the federation route so the broker stops sending messages to a dead link
@@ -816,17 +817,7 @@ class Kernel:
 
 
     def on_net_manifest_received(self, frame: Frame) -> None:
-        remote_system = frame.payload.get("sys_name")
-        remote_manifests = frame.payload.get("manifests", {})
-        t = "Kernel: received {count} manifests from {sys}"
-        self._log.inf(t, count=len(remote_manifests), sys=remote_system)
-        
-        # Save raw manifest dictionaries directly into the broker's cache
-        for addr_str, m_dict in remote_manifests.items():
-            self._broker.get_addr(addr_str, create=True, find=False)
-            self._broker._remote_manifests[addr_str] = m_dict
-        t = "Kernel: Registered and cached {count} passports from '{sys}'"
-        self._log.inf(t, count=len(remote_manifests), sys=remote_system)
+        self._broker.on_net_manifest_received(frame)
 
     # Callback for WatchDog: Exposes live active thread pools dict cleanly
     def get_managers(self) -> dict[str, ThreadManager]:
@@ -843,7 +834,7 @@ class Kernel:
             action=ExecutionStrategy.WORKING
         )
         if success:
-            self._log.inf("Stalled Thread '{name}' successfully resurrected.", p=manager.name)
+            self._log.inf("Stalled Thread '{name}' successfully resurrected.", name=manager.name)
         else:
             self._log.err("Thread '{name}' reset failed.", name=manager.name)
 

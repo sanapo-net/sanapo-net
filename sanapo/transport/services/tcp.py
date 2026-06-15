@@ -68,6 +68,7 @@ class TcpConnection(threading.Thread):
         self.stitcher = FrameStitcher(config)
         self.last_rx = perf_counter()
         self._alive = True
+        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
     def run(self):
         """Continuous receiving loop with heartbeat check."""
@@ -119,7 +120,6 @@ class TcpConnection(threading.Thread):
         except Exception:
             return False
 
-    # logic error with _alive
     def stop(self):
         """Graceful resource cleanup."""
         if not self._alive:
@@ -214,7 +214,6 @@ class TcpService(threading.Thread):
             self._log.err("TCP: Authentication protocol failure: {e}", e=e)
             return False
 
-
     def run(self):
         """Main Listener Loop (Server Role)."""
         self._is_running = True
@@ -249,6 +248,9 @@ class TcpService(threading.Thread):
     def _inbound_handshake(self, sock: socket.socket, addr: tuple):
         """Initial contact protocol: verifies magic, crypto-auth, and system names with manifest exchange."""
         try:
+            # Disable Nagle for incoming server connection
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            
             sock.settimeout(self._cfg.HANDSHAKE_TIMEOUT)
             
             # 1. Receive Magic Header (8 bytes).
@@ -494,7 +496,7 @@ class TcpService(threading.Thread):
     
     def connect_to(self, host: str, port: int) -> bool:
         """Forcefully initiates an outbound TCP connection to the specified node with immediate passport validation."""
-        if True:#try:
+        try:
             # Check if there is already an active connection with this address
             with self._lock:
                 for conn in self._connections.values():
@@ -504,6 +506,10 @@ class TcpService(threading.Thread):
             self._log.inf("TCP: Initiating explicit connect to {host}:{port}...", host=host, port=port)
             
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+            # Disable Nagle for outbound client connection
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
             sock.settimeout(self._cfg.HANDSHAKE_TIMEOUT)
             sock.connect((host, port))
             
@@ -566,10 +572,9 @@ class TcpService(threading.Thread):
             self._register_connection(remote_name, sock, (host, port))
             self._unpack_and_register_manifests(remote_m_bytes, remote_name)
             return True
-        #except Exception as e:
-        #    self._log.err("TCP: Explicit connect to {host}:{port} failed: {e}", host=host, port=port, e=e)
-        #    return False
-
+        except Exception as e:
+            self._log.err("TCP: Explicit connect to {host}:{port} failed: {e}", host=host, port=port, e=e)
+            return False
 
     def is_conn_alive(self, name: str) -> bool:
         """Checks if an active session exists for a given federation system name."""

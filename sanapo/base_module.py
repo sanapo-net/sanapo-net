@@ -22,7 +22,7 @@ class BaseModule:
             "is_persistent": True
         }
     
-    def on_net_connected(self, system_name: str):
+    def on_net_ready(self, system_name: str):
         """Callback fired automatically when a network link is established."""
         pass
 
@@ -36,7 +36,7 @@ class BaseModule:
 
     def stop(self):
         """Save/close resurses here"""
-        pass
+        return True # True if stopped successfully
 
     def start(self):
         """Open/load resurses here, preparings and setup unit-params"""
@@ -44,8 +44,7 @@ class BaseModule:
         # self._u.start_timeout = 0.5
         # self._u.stop_timeout = 2
         # self._u.step_timeout = 0.2
-        self.v.started()
-        pass
+        return True # True if started successfully
 
     def __repr__(self) -> str:
         cls_name = self.__class__.__name__

@@ -68,8 +68,9 @@ class SysType(BriefEnumMixin, str, Enum):
     # Transport
     RAW = "raw"
     NET_CONNECTED = "net_connected"
-    NET_DISCONNECTED = "net_disconnected"
     NET_MANIFEST_RECEIVED = "net_manifest_received"
+    NET_READY = "net_ready"
+    NET_DISCONNECTED = "net_disconnected"
 
 @unique
 class RptType(BriefEnumMixin, str, Enum):

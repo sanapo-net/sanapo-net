@@ -28,7 +28,7 @@ class KernelSecretary(Secretary):
         self._kernel = kernel
         self.auto_subscribe()
 
-
+    # TODO del SUB UNSUB SUB_SETUP there
     def auto_subscribe(self) -> None:
         self._handlers_sys: dict[SysType, callable] = {
             SysType.NET_CONNECTED: self._kernel.on_net_connected,

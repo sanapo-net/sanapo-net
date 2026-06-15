@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from sanapo.manifest import Manifest
 
 # TODO in v2: resolve collision with diffrent EVT CMD from different projects
+# TODO in v2: manifest updating
 class MessageBroker:
     """
     Core Router of sanapo framework.
@@ -33,6 +34,7 @@ class MessageBroker:
         # Routing tables
         self._local_routes: dict[str, BaseAdapterTransport] = {}
         self._federation_routes: dict[str, BaseAdapterTransport] = {}
+        self._federation_ready: dict[str, bool] = {}
         self._addr_book: dict[str, Addr] = {}
         self._local_manifests: dict[str, Manifest] = {}
         self._remote_manifests: dict[str, dict] = {}
@@ -41,7 +43,7 @@ class MessageBroker:
         self._subscribers: dict[any, set[Addr]] = {}
         self._tcp_service: Optional[TcpService] = None
         self.addr = Addr(config.SYSTEM_NAME, config.ADDR_BROKER_STR)
-        self._addr_lock = threading.Lock()
+        self._addr_lock = threading.RLock()
 
     def set_tcp_service(self, service: TcpService):
         """Link the broker to the network infrastructure."""
@@ -212,3 +214,18 @@ class MessageBroker:
                 addr_str = f"{self._cfg.SYSTEM_NAME}:{u_name}"
                 public_maps[addr_str] = manifest.to_dict()
         return public_maps
+    
+    def on_net_manifest_received(self, frame: Frame) -> None:
+        remote_system = frame.payload.get("sys_name")
+        remote_manifests = frame.payload.get("manifests", {})
+        t = "BROKER: received {count} manifests from {sys}"
+        self._log.inf(t, count=len(remote_manifests), sys=remote_system)
+        
+        # Save raw manifest dictionaries directly into the broker's cache
+        for addr_str, m_dict in remote_manifests.items():
+            self.get_addr(addr_str, create=True, find=False)
+            self._remote_manifests[addr_str] = m_dict
+        t = "BROKER: Registered and cached {count} passports from '{sys}'"
+        self._log.inf(t, count=len(remote_manifests), sys=remote_system)
+        self._federation_ready[remote_system] = True
+        self.broadcast_sys_message(SysType.NET_READY, {"sys_name": remote_system})

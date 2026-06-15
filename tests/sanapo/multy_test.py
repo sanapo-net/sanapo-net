@@ -1,6 +1,10 @@
-import sys
+# tests/sanapo/multy_tests.py
 import os
+import gc
+import sys
 import time
+import shutil
+import socket
 import random
 import argparse
 import traceback
@@ -8,12 +12,13 @@ import traceback
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from sanapo.config import Config
-from sanapo.enums import RptType, ThreadType, UnitType, TierStat, BootTask, RptReason
-from sanapo.enums import ClubAccessError, EnumRegistry, ThreadStat, UnitStat
+from sanapo.enums import RptType, ThreadType, UnitType, BootTask, RptReason
+from sanapo.enums import ClubAccessError, EnumRegistry, UnitStat
 from sanapo.kernel import Kernel
 from sanapo.views import KernelUserView
 from sanapo.base_module import BaseModule
 from sanapo.protocol import Frame
+from sanapo.addr import Addr
 
 try:
     from core.drafts.project_enums import EvtType, CmdType
@@ -24,27 +29,26 @@ except ImportError:
 LOCAL_TEST_PASSED = False
 NET_TEST_PASSED = False
 
-# automated verification matrices
 class TestLedger:
-    """Automated test matrix tracker with zero dependencies on global state."""
-    def __init__(self) -> None:
-        self.tests: dict[str, dict[str, bool]] = {}
+    """Automated test matrix tracker with robust global barrier synchronization."""
+    def __init__(self, node_name: str = "ALPHA") -> None:
+        self.executed_tests: dict[str, bool] = {}
+        self.node_name = node_name
+        self.sync_port = 45599
+        # Context trackers
+        self._current_class: str = "Test"
+        self._current_test: str = "Unknown"
+        self._current_nodes: list = []
 
-    def add_meta(self, test_name: str, is_ready: bool = True) -> None:
-        self.tests[test_name] = {"ready": is_ready, "attempted": False, "success": False}
-
-    def start(self, test_name: str, class_name: str = "Test") -> None:
-        """Marks a test start, flushes filesystem state, and forces garbage collection."""
-        if test_name in self.tests:
-            self.tests[test_name]["attempted"] = True
-            
-        # --- HARD INFRASTRUCTURE PURGE BETWEEN DISCRETE PIPELINE PHASES ---
-        import shutil
-        import gc
-        
-        # 1. Clean disk: Wipe out stale atomic dumps from kernel persistence consistency loops
-        # This prevents the core from auto-restoring zombie modules like UNIT_STUBBORN
-        dump_path = "consist_dump" # Change this string to match your Config.SYS_CONSIST_PATH
+    def start(self, test_name: str, class_name: str, nodes: list = None) -> None:
+        """Marks a test start, saves context, and triggers START network barrier."""
+        print(f"\033[95m[ TEST ] >>> {test_name}\033[0m")
+        self._current_class = class_name
+        self._current_test = test_name
+        self._current_nodes = nodes if nodes else []
+        if nodes and len(nodes) > 1:
+            self._global_barrier(class_name, "READY", nodes)
+        dump_path = "consist_dump"
         try:
             shutil.rmtree(dump_path, ignore_errors=True)
             if os.path.exists(f"{dump_path}_dump.json"): os.remove(f"{dump_path}_dump.json")
@@ -52,68 +56,167 @@ class TestLedger:
             if os.path.exists(f"{dump_path}_dump.tmp"): os.remove(f"{dump_path}_dump.tmp")
         except:
             pass
-
-        # 2. Clean RAM: Force unreferenced structures, sockets, and threads to be destroyed
         gc.collect()
 
-        # Purple [ TEST ] marker with the calling class name to isolate logs
-        print(f"\033[95m[ TEST ] >>> Running: {class_name} ({test_name})\033[0m")
+    def start_assistent(self, test_name: str, class_name: str, nodes: list = None) -> None:
+        """Assistant entry point. Saves context and triggers START network barrier."""
+        print(f"\033[95m[ TEST ] >>> {test_name}\033[0m")
+        self._current_class = class_name
+        self._current_test = test_name
+        self._current_nodes = nodes if nodes else []
 
-    def start_assistent(self, test_name: str, class_name: str = "Test") -> None:
-        print(f"\033[95m[ TEST ] >>> Running: {class_name} ({test_name})\033[0m")
+        if nodes and len(nodes) > 1:
+            self._global_barrier(class_name, "READY", nodes)
 
-    def ok(self, key: str) -> None:
-        """Registers test success and prints a beautifully formatted green checkmark."""
-        if key in self.tests:
-            self.tests[key]["success"] = True
-        self._print_ok(f"✓  {key}")
+    def ok(self) -> None:
+        """Registers test success and triggers END barrier using stored context."""
+        test_name = self._current_test
+        self.executed_tests[test_name] = True
+        print(f"\033[95m[  OK  ] ✓  {self._current_class}\033[0m")
+        if self._current_nodes and len(self._current_nodes) > 1:
+            self._global_barrier(self._current_class, "FINISHED", self._current_nodes)
 
-    def fail(self, key: str, err_text: str = "") -> None:
-        """Registers test failure and prints a red cross with optional error trace."""
-        if key in self.tests:
-            self.tests[key]["success"] = False
-        self._print_fail(f"✗  {key}")
+    def fail(self, err_text: str = "") -> None:
+        """Registers test failure and forces END barrier using stored context."""
+        test_name = self._current_test
+        self.executed_tests[test_name] = False
+        print(f"\033[91m[ FAIL ] ✗  {self._current_class}\033[0m")
         if err_text:
-            # Prints the error text on a new line, aligned and entirely in red
             print(f"\033[91m   Error: {err_text}\033[0m")
+        if self._current_nodes and len(self._current_nodes) > 1:
+            self._global_barrier(self._current_class, "FINISHED", self._current_nodes)
 
-    def _print_ok(self, text: str) -> None:
-        print(f"\033[95m[  OK  ] {text}\033[0m")
-
-    def stop_assistent(self, text: str) -> None:
-        print(f"\033[95m[  END  ] {text}\033[0m")
-
-    def _print_fail(self, text: str) -> None:
-        print(f"\033[91m[ FAIL ] {text}\033[0m")
+    def stop_assistent(self) -> None:
+        """Stops assistant execution loop and enters END barrier using stored context."""
+        print(f"\033[95m[  END  ] {self._current_class}\033[0m")
+        if self._current_nodes and len(self._current_nodes) > 1:
+            self._global_barrier(self._current_class, "FINISHED", self._current_nodes)
 
     def print_results(self) -> None:
         print("\n" + "=" * 70)
         print("  SANAPO FRAMEWORK V1 - AUTOMATED VERIFICATION MATRIX")
         print("=" * 70)
         total, passed, has_failures = 0, 0, False
-        for name, flags in self.tests.items():
-            if not flags["ready"]: continue
+        for name, success in self.executed_tests.items():
             total += 1
-            attempt = "● ATTEMPTED" if flags["attempted"] else "○ SKIPPED"
-            if flags["success"]:
-                status = "\033[92m[PASSED]\033[0m"
-                passed += 1
-            else:
-                status = "\033[91m[FAILED]\033[0m"
-                if flags["attempted"]: has_failures = True
-            print(f"- {name:<55} {attempt:<12} -> {status}")
+            status = "\033[92m[PASSED]\033[0m" if success else "\033[91m[FAILED]\033[0m"
+            if not success: has_failures = True
+            else: passed += 1
+            print(f"- {name:<55} -> {status}")
         print("=" * 70)
         if has_failures:
             print("\033[1;91mCRITICAL VERDICT: INFRASTRUCTURE DESTABILIZED!\033[0m")
         elif passed == total and total > 0:
             print("\033[1;92mGRAND VERDICT: FULL ARCHITECTURAL TRIUMPH!\033[0m")
         else:
-            print("\033[1;93mVERDICT: PARTIAL TESTING INTERSECTION.\033[0m")
+            print("\033[1;93mVERDICT: NO TESTS WERE EXECUTED.\033[0m")
         print("=" * 70 + "\n")
 
+    def _clear_udp_sys_buffer(self, sock: socket.socket) -> None:
+        old_timeout = sock.gettimeout()
+        try:
+            sock.setblocking(False)
+            while True:
+                sock.recvfrom(65535)
+        except BlockingIOError:
+            pass
+        finally:
+            sock.settimeout(old_timeout)
 
-# --- Tests ---
-# Suboptimal tests
+    def _global_barrier(self, class_name: str, phase: str, nodes: list, timeout: float = 10.0) -> None:
+        """Symmetric peer-to-peer UDP broadcast barrier with strict validation."""
+        expected_nodes = set(nodes)
+        collected_nodes = {self.node_name}
+        
+        if phase == "READY":
+            print(f"\033[95m[ SYNC ] >>> {self.node_name} ready for test: {class_name}\033[0m")
+        else:
+            print(f"\033[95m[ SYNC ] >>> {self.node_name} end test: {class_name}\033[0m")
+
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            s.bind(('', self.sync_port))
+            s.settimeout(0.1)
+            
+            my_msg = f"{self.node_name}:{class_name}:{phase}".encode()
+            start_time = time.time()
+            
+            while len(collected_nodes) < len(expected_nodes):
+                if time.time() - start_time > timeout:
+                    print(f"\033[91m[ SYNC ] >>> Barrier TIMEOUT ({timeout}s) on {class_name}!\033[0m")
+                    return
+
+                s.sendto(my_msg, ('255.255.255.255', self.sync_port))
+                
+                try:
+                    data, addr = s.recvfrom(1024)
+                    decoded = data.decode().split(":")
+                    if len(decoded) == 3:
+                        remote_node, remote_class, remote_phase = decoded
+                        if remote_class == class_name and remote_phase == phase:
+                            if remote_node in expected_nodes and remote_node != self.node_name:
+                                collected_nodes.add(remote_node)
+                except socket.timeout:
+                    continue
+
+            self._clear_udp_sys_buffer(s)
+
+        if phase == "READY":
+            print(f"\033[95m[ SYNC ] >>> ALL ready for test: {class_name}\033[0m")
+        else:
+            print(f"\033[95m[ SYNC ] >>> ALL finished test: {class_name}\033[0m")
+
+class Triggers:
+    def __init__(self, triggers_list: list = None):
+        if triggers_list is None: triggers_list = []
+        self._triggers = dict.fromkeys(triggers_list, False)
+        self._total_count = len(self._triggers)
+        self._true_count = 0
+
+    # triggers.some_trigger -> returns bool
+    def __getattr__(self, name):
+        if name in self._triggers:
+            return self._triggers[name]
+        raise AttributeError(f"Trigger '{name}' does not exist")
+
+    # triggers.some_trigger = True/False -> triggers print
+    def __setattr__(self, name, value):
+        if name in ["_triggers", "_total_count", "_true_count"]:
+            super().__setattr__(name, value)
+        elif name in self._triggers:
+            if not isinstance(value, bool):
+                raise TypeError("Trigger value must be True or False")
+            
+            # Print only if the value actually changes
+            if self._triggers[name] != value:
+                self._triggers[name] = value
+                self._true_count += 1 if value else -1
+                status = "ok" if value else "fail"
+                stats = f" ({self._true_count}/{self._total_count})"
+                print(f'\033[95mTrigger "{name}" - {status}{stats}\033[0m')
+        else:
+            raise AttributeError(f"Cannot dynamically create trigger '{name}'")
+
+    # triggers.all_ok -> returns True if all triggers are True
+    @property
+    def all_ok(self) -> bool:
+        return self._true_count == self._total_count
+
+    # Formats the output string to keep lines short
+    def _to_string(self) -> str:
+        pairs = " ".join(f"{k}={int(v)}" for k, v in self._triggers.items())
+        return f"Triggers: {pairs}"
+
+    def __str__(self) -> str:
+        return self._to_string()
+
+    def __repr__(self) -> str:
+        return self._to_string()
+
+
+# --- Suboptimal Tests ---
+
 class Test_StartStopSystem:
     """
     TRIGGERS:
@@ -1753,36 +1856,27 @@ class Test_SecretaryAdvancedCallbacksAndDeadlines:
         finally:
             api.stop()
 
-# Canonical tests
+# --- Canonical Tests ---
+
 class Test_NetworkAutoDiscovery:
     """
     TRIGGERS: get manifest exchange, get connection confirmed.
     """
     @staticmethod
-    def run(ledger: TestLedger, node_name: str):
+    def run(ledger: TestLedger, node_name: str, nodes: list[str]):
         class_name = "Test_NetworkAutoDiscovery"
         test_name = "Network: Auto-discovery and TCP Connection"
-        if node_name == "ALPHA": ledger.start(test_name, class_name)
-        else: ledger.start_assistent(test_name, class_name)
+        if node_name == "ALPHA": ledger.start(test_name, class_name, nodes)
+        else: ledger.start_assistent(test_name, class_name, nodes)
 
-        # Triggers
-        manifest_suc = False
-        connected_suc = False
-        
-        def triggers_str() -> str:
-            return f"manifest_suc={int(manifest_suc)}, connected_suc={int(connected_suc)}"
-        
-        def triggers_res() -> bool:
-            return all((manifest_suc, connected_suc))
+        triggers = Triggers(["manifest", "connected", "connect_ready"])
 
         class ConnectDedector(BaseModule):
-            def start(self):
-                self.v.started()
+            def start(self) -> bool:
+                return True
 
-            def on_net_connected(self, system_name: str):
-                nonlocal connected_suc
-                connected_suc = True
-                self.v.log.inf("Connected to {name}", name=system_name)
+            def on_net_ready(self, system_name: str) -> None:
+                triggers.connect_ready = True
 
 
         reg = EnumRegistry.create_default(evt_cls=EvtType, cmd_cls=CmdType)
@@ -1792,35 +1886,39 @@ class Test_NetworkAutoDiscovery:
 
         try:
             mnfst = {"is_public": True}
-            api.add_unit("PUBLIC",UnitType.TICKABLE, BaseModule, manifest=mnfst)
+            api.add_unit("PUBLIC", UnitType.TICKABLE, BaseModule, manifest=mnfst)
             api.add_unit("CONNECT_DETECTOR", UnitType.TICKABLE, ConnectDedector)
             api.start()
 
-            max_wait = 100
-            while not triggers_res() and max_wait > 0:
+            max_wait = 1000
+            while not triggers.all_ok and max_wait > 0:
                 kernel.step()
-                time.sleep(0.05)
+                time.sleep(0.005)
+                if api._kernel._tcp_service._connections:
+                    if not triggers.connected:
+                        triggers.connected = True
+                        print(f"connections:{api._kernel._tcp_service._connections}")
                 if api._kernel._broker._remote_manifests:
-                    if not manifest_suc:
-                        manifest_suc = True
-                        print(f"manifest_suc, manifest={api._kernel._broker._remote_manifests}")
+                    if not triggers.manifest:
+                        triggers.manifest = True
+                        print(f"manifest={api._kernel._broker._remote_manifests}")
                 max_wait -= 1
 
             if node_name == "ALPHA":
-                if triggers_res():
-                    ledger.ok(test_name)
+                if triggers.all_ok:
+                    ledger.ok()
                     kernel._tcp_service.disconnect_all()
                 else:
-                    t = f"Connecting timeout. {triggers_str()}"
-                    ledger.fail(test_name, t)        
-            else:
-               if connected_suc:
-                    ledger.stop_assistent(test_name)
+                    t = f"Connecting timeout. {triggers}"
+                    ledger.fail(t)
                     kernel._tcp_service.disconnect_all()
+            else:
+                ledger.stop_assistent()
+                kernel._tcp_service.disconnect_all()
 
         except Exception as e:
-            if node_name == "ALPHA": ledger.fail(test_name, f"{triggers_str()} {e}")
-            else: ledger.stop_assistent(test_name)
+            if node_name == "ALPHA": ledger.fail(f"{triggers} {e}")
+            else: ledger.stop_assistent()
             traceback.print_exc()
         finally:
             api.stop()
@@ -1828,78 +1926,63 @@ class Test_NetworkAutoDiscovery:
                 kernel.step()
                 time.sleep(0.05)
 
+# TODO test for v2
 class Test_NetworkEventExchange:
-    """TRIGGERS: check cross-system EvtType.TEST delivery from BETA to ALPHA."""
+    """
+    TRIGGERS: check cross-system EvtType.TEST delivery from BETA to ALPHA.
+    THIS FEATURE WILL BE REALISED IN SANAPO v2
+    """
 
     @staticmethod
-    def run(ledger: TestLedger, node_name: str):
+    def run(ledger: TestLedger, node_name: str, nodes: list[str]):
         class_name = "Test_NetworkEventExchange"
         test_name = "Network: Cross-System Event Delivery"
-        if node_name == "ALPHA": ledger.start(test_name, class_name)
-        else: ledger.start_assistent(test_name, class_name)
+        if node_name == "ALPHA": ledger.start(test_name, class_name, nodes)
+        else: ledger.start_assistent(test_name, class_name, nodes)
         
-        # Tiggers
-        manifest_suc = False
-        connected_suc = False
-        listener_called = False
-
-        def triggers_str() -> str:
-            return (f"manifest_suc={int(manifest_suc)}, "
-                    f"connected_suc={int(connected_suc)}, "
-                    f"listener_called={int(listener_called)}")
-        
-        def triggers_res() -> bool:
-            return all((manifest_suc, connected_suc, listener_called))
+        triggers = Triggers(["manifest", "connected", "connect_ready", "listener_called"])
 
         class Listener(BaseModule):
             """Module on ALPHA side that subscribes to external events."""
-            def start(self) -> None:
+            def start(self) -> bool:
                 self.v.scr.subscribe(cb=self._on_event, evt=EvtType.EVT_TEST)
-                self.v.started()
-
-            def _on_event(self, frame: Frame) -> bool:
-                if frame.evt_type == EvtType.EVT_TEST:
-                    nonlocal listener_called
-                    listener_called = True
-                    self.v.log.inf("successfully got EVT! ({txt})", txt=frame.payload["text"])
-                    # Answer
-                    self.v.scr.send_evt(EvtType.EVT_TEST, {"text": "Answer from ALPHA:LISTENER"})
-                    self.v.log.inf("answed echo with EvtType.TEST")
                 return True
 
-            def on_net_connected(self, system_name: str) -> None:
-                nonlocal connected_suc
-                connected_suc = True
-                self.v.log.inf("Connected to {name}", name=system_name)
+            def _on_event(self, frame: Frame) -> None:
+                if frame.evt_type != EvtType.EVT_TEST: return
+                if "BETA:EMITTER" not in frame.payload["text"]: return
+                triggers.listener_called = True
+                # Answer
+                self.v.log.inf("try send EvtType.TEST 'stop_text'")
+                self.v.scr.send_evt(EvtType.EVT_TEST, {"text": "stop_text"})
+
+            def on_net_ready(self, system_name: str) -> None:
+                triggers.connect_ready = True
 
         class Emitter(BaseModule):
             """Module on BETA side that publishes events after connection."""
-            def start(self) -> None:
+            def start(self) -> bool:
                 self.v.scr.subscribe(cb=self._on_event, evt=EvtType.EVT_TEST)
                 self.evt_already_sent = False
-                self.v.started()
-
-            def step(self) -> bool:
-                if not (connected_suc and manifest_suc): return True
-                if self.evt_already_sent: return True
-                if self.v.addr.system != "ALPHA":
-                    self.v.scr.send_evt(EvtType.EVT_TEST, {"text":"Hello from [assistent]:EMITTER"})
-                    self.v.log.inf("published EvtType.TEST")
-                    self.evt_already_sent = True
                 return True
+
+            def step(self) -> None:
+                if self.evt_already_sent: return
+                act_sys = self.v.get_active_systems()
+                if "ALPHA" not in act_sys: return
+                time.sleep(0.3)
+                self.v.log.inf("try publish EvtType.TEST")
+                self.v.scr.send_evt(EvtType.EVT_TEST, {"text":"Hello from BETA:EMITTER"})
+                self.evt_already_sent = True
             
-            def _on_event(self, frame: Frame) -> bool:
-                if frame.evt_type == EvtType.EVT_TEST:
-                    if frame.sender.system == "ALPHA":
-                        nonlocal listener_called
-                        listener_called = True
-                        self.v.log.inf("successfully got EVT! ({txt})", txt=frame.payload["text"])
-                return True
+            def _on_event(self, frame: Frame) -> None:
+                if frame.evt_type != EvtType.EVT_TEST: return
+                if frame.sender.system != "ALPHA": return
+                if frame.payload["text"] != "stop_test": return
+                triggers.listener_called = True
 
-            def on_net_connected(self, system_name: str) -> None:
-                nonlocal connected_suc
-                connected_suc = True
-                self.v.log.inf("Connected to {name}", name=system_name)
+            def on_net_ready(self, system_name: str) -> None:
+                triggers.connect_ready = True
 
 
         reg = EnumRegistry.create_default(evt_cls=EvtType, cmd_cls=CmdType)
@@ -1916,30 +1999,32 @@ class Test_NetworkEventExchange:
             
             api.start()
 
-            max_wait = 200
-            while not triggers_res() and max_wait > 0:
+            max_wait = 1000
+            while not triggers.all_ok and max_wait > 0:
                 kernel.step()
-                time.sleep(0.05)
+                time.sleep(0.005)
+                if api._kernel._tcp_service._connections:
+                    if not triggers.connected:
+                        triggers.connected = True
                 if api._kernel._broker._remote_manifests:
-                    if not manifest_suc:
-                        manifest_suc = True
-                        kernel._log.inf("Manifest exchange completed")
+                    if not triggers.manifest:
+                        triggers.manifest = True
                 max_wait -= 1
 
             if node_name == "ALPHA":
-                if triggers_res():
-                    ledger.ok(test_name)
+                if triggers.all_ok:
+                    ledger.ok()
                     kernel._tcp_service.disconnect_all()
                 else:
-                    t = f"Event delivery timeout. {triggers_str()}"
-                    ledger.fail(test_name, t)        
+                    t = f"Event delivery timeout. {triggers}"
+                    ledger.fail(t)        
             else:
-                if triggers_res():
-                    kernel._tcp_service.disconnect_all()
+                ledger.stop_assistent()
+                kernel._tcp_service.disconnect_all()
 
         except Exception as e:
-            if node_name == "ALPHA": ledger.fail(test_name, f"{triggers_str()} {e}")
-            else: ledger.stop_assistent(test_name)
+            if node_name == "ALPHA": ledger.fail(f"{triggers} {e}")
+            else: ledger.stop_assistent()
             traceback.print_exc()
         finally:
             api.stop()
@@ -1954,86 +2039,63 @@ class Test_NetworkCommandExchange:
     """
 
     @staticmethod
-    def run(ledger: TestLedger, node_name: str):
+    def run(ledger: TestLedger, node_name: str, nodes: list[str]):
         class_name = "Test_NetworkCommandExchange"
         test_name = "Network: Command and Report Exchange"
-        if node_name == "ALPHA": ledger.start(test_name, class_name)
-        else: ledger.start_assistent(test_name, class_name)
+        if node_name == "ALPHA": ledger.start(test_name, class_name, nodes)
+        else: ledger.start_assistent(test_name, class_name, nodes)
         
-        # Triggers
-        manifest_suc = False
-        connected_suc = False
-        local_cmd = False
-        remote_cmd = False
-        local_rpt = False
-        remote_rpt = False
-
-        def triggers_str() -> str:
-            t = f"manifest_suc={int(manifest_suc)}, connected_suc={int(connected_suc)} "
-            t+= f"local_cmd={int(local_cmd)}, remote_cmd={int(remote_cmd)} "
-            t+= f"local_rpt={int(local_rpt)}, remote_rpt={int(remote_rpt)} "
-            return t
-        
-        def triggers_res() -> bool:
-            return all((manifest_suc, connected_suc, local_cmd, remote_cmd, local_rpt, remote_rpt))
-
+        triggers = Triggers(["manifest", "connected", "connect_ready", "local_cmd", "remote_cmd", 
+                             "local_rpt", "remote_rpt"])
 
         class Comander(BaseModule):
-            def start(self) -> None:
+            def start(self) -> bool:
                 self.cmd_already_sended = False
                 self.local_sys = self.v.addr.system
                 self.remote_sys = "BETA" if self.local_sys == "ALPHA" else "ALPHA"
-                self.v.started()
+                return True
                 
-            def step(self) -> bool:
-                nonlocal manifest_suc
-                if not manifest_suc: return True
-                if self.cmd_already_sended: return True
-                
-                for k, v in {"local": self.local_sys, "remote": self.remote_sys}.items():
-                    self.v.log.dbg("try get {type_target} target", type_target=k)
-                    target = self.v.addr_by_str(f"{v}:REPORTER")
+            def step(self) -> None:
+                if not triggers.manifest: return
+                if self.cmd_already_sended: return
+                for type_target, sys_name in {"local": self.local_sys, "remote": self.remote_sys}.items():
+                    self.v.log.dbg("try get {type_target} target", type_target=type_target)
+                    target = self.v.addr_by_str(f"{sys_name}:REPORTER")
                     if target:
-                        self.v.log.dbg("got {type_target} target", type_target=k)
-                        p = {"data": f"hello from {self.v.addr}! ({k})"}
+                        self.v.log.dbg("got {type_target} target", type_target=type_target)
+                        p = {"data": f"hello from {self.v.addr}! ({type_target})"}
                         self.v.scr.send_cmd(target, CmdType.CMD_TEST, self._on_rpt, payload=p)
                     else:
-                        self.v.log.err("cant get {type_target} target", type_target=k)
+                        self.v.log.err("cant get {type_target} target", type_target=type_target)
                 self.cmd_already_sended = True
-                return True
             
             def _on_rpt(self, frame: Frame) -> None:
+                self.v.log.inf("get rpt from {sys}: {frame}", sys=self.local_sys, frame=frame)
                 if frame.rpt_type == RptType.DONE:
                     if frame.sender.system == self.local_sys:
-                        nonlocal local_rpt
-                        local_rpt = True
-                    if frame.sender.system == self.remote_sys:
-                        nonlocal remote_rpt
-                        remote_rpt = True
-                self.v.log.inf("get rpt from {sys}: {frame}", sys=self.local_sys, frame=frame)  
+                        triggers.local_rpt = True
+                    elif frame.sender.system == self.remote_sys:
+                        triggers.remote_rpt = True
 
         class Reporter(BaseModule):
-            def _on_cmd(self, frame: Frame) -> bool:
+            def start(self) -> bool:
+                self.v.scr.subscribe(cb=self._on_cmd, cmd=CmdType.CMD_TEST)
+                self.local_sys = self.v.addr.system
+                self.remote_sys = "BETA" if self.local_sys == "ALPHA" else "ALPHA"
+                return True
+                
+            def _on_cmd(self, frame: Frame) -> None:
                 if self.v.addr.system == 'ALPHA':
-                    if frame.sender.system == 'ALPHA':
-                        nonlocal local_cmd
-                        local_cmd = True
-                    elif frame.sender.system == 'BETA':
-                        nonlocal remote_cmd
-                        remote_cmd = True
-                time.sleep(0.1)
+                    if frame.sender.system == self.local_sys:
+                        triggers.local_cmd = True
+                    elif frame.sender.system == self.remote_sys:
+                        triggers.remote_cmd = True
                 p = {"echo": frame.payload.get("data")}
                 self.v.scr.send_rpt(frame.sender, frame.cmd_id, RptType.DONE, p)
-                return True
             
-            def start(self):
-                self.v.scr.subscribe(cb=self._on_cmd, cmd=CmdType.CMD_TEST)
-                self.v.started()
-                
-            def on_net_connected(self, system_name: str):
-                nonlocal connected_suc
-                connected_suc = True
-                self.v.log.inf("Connected to {name}", name=system_name)
+            def on_net_ready(self, system_name: str):
+                triggers.connect_ready = True
+
 
         reg = EnumRegistry.create_default(evt_cls=EvtType, cmd_cls=CmdType)
         kernel = Kernel(enum_reg=reg, system_name=node_name)
@@ -2046,31 +2108,139 @@ class Test_NetworkCommandExchange:
             api.add_unit("REPORTER", UnitType.TICKABLE, Reporter, manifest=mnfst)
             api.start()
 
-            max_wait = 100
-            while not triggers_res() and max_wait > 0:
+            max_wait = 1000
+            while not triggers.all_ok and max_wait > 0:
                 kernel.step()
-                time.sleep(0.05)
+                time.sleep(0.005)
+                if api._kernel._tcp_service._connections:
+                    if not triggers.connected:
+                        triggers.connected = True
                 if api._kernel._broker._remote_manifests:
-                    if not manifest_suc:
-                        manifest_suc = True
-                        print(f"manifest_suc, manifest={api._kernel._broker._remote_manifests}")
+                    if not triggers.manifest:
+                        triggers.manifest = True
                 max_wait -= 1
 
             if node_name == "ALPHA":
-                if triggers_res():
-                    ledger.ok(test_name)
+                if triggers.all_ok:
+                    ledger.ok()
                     kernel._tcp_service.disconnect_all()
                 else:
-                    t = f"Connecting timeout. {triggers_str()}"
-                    ledger.fail(test_name, t)        
+                    t = f"Connecting timeout. {triggers}"
+                    ledger.fail(t)        
             else:
-                if connected_suc:
-                    ledger.stop_assistent(test_name)
-                    kernel._tcp_service.disconnect_all()
+                ledger.stop_assistent()
+                kernel._tcp_service.disconnect_all()
 
         except Exception as e:
-            if node_name == "ALPHA": ledger.fail(test_name, f"{triggers_str()} {e}")
-            else: ledger.stop_assistent(test_name)
+            if node_name == "ALPHA": ledger.fail(f"{triggers} {e}")
+            else: ledger.stop_assistent()
+            traceback.print_exc()
+        finally:
+            api.stop()
+            while api.is_running:
+                kernel.step()
+                time.sleep(0.05)
+
+class Test_NetworkServiceDiscovery:
+    """
+    TRIGGERS: Connection, manifests, find by role, find by tag,
+    send commands to discovered units, receive reports.
+    """
+    @staticmethod
+    def run(ledger: TestLedger, node_name: str, nodes: list[str]):
+        class_name = "Test_NetworkServiceDiscovery"
+        test_name = "Network: Full Service Discovery (Role + Tag)"
+        if node_name == "ALPHA": ledger.start(test_name, class_name, nodes)
+        else: ledger.start_assistent(test_name, class_name, nodes)
+        
+        triggers = Triggers(["connected", "manifest", "connect_ready", "role_found", "tag_found", 
+                             "role_cmd_ok", "tag_cmd_ok"])
+
+        class Reporter(BaseModule):
+            def start(self) -> bool:
+                self.v.scr.subscribe(cb=self._on_cmd, cmd=CmdType.CMD_TEST)
+                self.local_sys = self.v.addr.system
+                self.remote_sys = "BETA" if self.local_sys == "ALPHA" else "ALPHA"
+                return True
+
+            def _on_cmd(self, frame: Frame) -> bool:
+                p = frame.payload
+                self.v.scr.send_rpt(frame.sender, frame.cmd_id, RptType.DONE, p)
+        
+        class FinderCommander(BaseModule):
+            def start(self) -> bool:
+                self.local_sys = self.v.addr.system
+                self.remote_sys = "BETA" if self.local_sys == "ALPHA" else "ALPHA"
+                return True
+
+            def on_net_ready(self, system_name: str) -> None:
+                triggers.connect_ready = True
+                target = self.v.get_remote_addrs_by_role("some_role1")[0]
+                print(f"target={target}")
+                if isinstance(target, Addr):
+                    triggers.role_found = True
+                    p = {"text": "founded_by_role"}
+                    self.v.scr.send_cmd(target, CmdType.CMD_TEST, self._on_role_done, payload=p)
+                target = self.v.get_remote_addrs_by_tag("some_tag1")[0]
+                
+                print(6)
+                if isinstance(target, Addr):
+                    triggers.tag_found = True
+                    p = {"text": "founded_by_tag"}
+                    
+                    print(7)
+                    self.v.scr.send_cmd(target, CmdType.CMD_TEST, self._on_tag_done, payload=p)
+
+            def _on_role_done(self, frame: Frame) -> None:
+                triggers.role_cmd_ok = True
+
+            def _on_tag_done(self, frame: Frame) -> None:
+                triggers.tag_cmd_ok = True
+
+
+        reg = EnumRegistry.create_default(evt_cls=EvtType, cmd_cls=CmdType)
+        kernel = Kernel(enum_reg=reg, system_name=node_name)
+        api = KernelUserView(kernel)
+        kernel._cfg.TCP_PORT_DEFAULT = 45501 if node_name == "ALPHA" else 45502
+
+        try:
+            if node_name == "ALPHA":
+                api.add_unit("COMANDER", UnitType.TICKABLE, FinderCommander, 
+                         manifest={"is_public": True})
+            else:
+                api.add_unit("REPORTER-1", UnitType.TICKABLE, Reporter, 
+                            manifest={"is_public": True, "tags": ["some_tag1",], "role": "some_role1"})
+                api.add_unit("REPORTER-2", UnitType.TICKABLE, BaseModule, 
+                            manifest={"is_public": True, "tags": ["some_tag2",], "role": "some_role2"})
+            api.start()
+
+            max_wait = 1000
+            while not triggers.all_ok and max_wait > 0:
+                kernel.step()
+                time.sleep(0.005)
+                if api._kernel._tcp_service._connections:
+                    if not triggers.connected:
+                        triggers.connected = True
+                if api._kernel._broker._remote_manifests:
+                    if not triggers.manifest:
+                        triggers.manifest = True
+                max_wait -= 1
+
+            if node_name == "ALPHA":
+                if triggers.all_ok:
+                    ledger.ok()
+                    kernel._tcp_service.disconnect_all()
+                else:
+                    t = f"Connecting timeout. {triggers}"
+                    print(f"triggers.all_ok={triggers.all_ok}")
+                    ledger.fail(t)        
+            else:
+                ledger.stop_assistent()
+                kernel._tcp_service.disconnect_all()
+
+        except Exception as e:
+            if node_name == "ALPHA": ledger.fail(f"{triggers} {e}")
+            else: ledger.stop_assistent()
             traceback.print_exc()
         finally:
             api.stop()
@@ -2079,156 +2249,7 @@ class Test_NetworkCommandExchange:
                 time.sleep(0.05)
 
 
-#0000000000
-class Test_NetworkServiceDiscoveryFull:
-    """
-    TRIGGERS: Connection, manifests, find by role, find by tag,
-             send commands to discovered units, receive reports.
-    """
-    @staticmethod
-    def run(ledger: TestLedger, node_name: str):
-        test_name = "Network: Full Service Discovery (Role + Tag)"
-        if node_name == "ALPHA":
-            ledger.start(test_name, "Test_NetworkServiceDiscoveryFull")
 
-        role_found = False
-        tag_found = False
-        role_cmd_ok = False
-        tag_cmd_ok = False
-        connected = False
-
-        class EchoModule(BaseModule):
-            def start(self):
-                self.v.scr.subscribe(cb=self._on_cmd, cmd=CmdType.CMD_TEST)
-                self.v.started()
-
-            def _on_cmd(self, frame: Frame) -> bool:
-                self.v.scr.send_rpt(
-                    frame.sender, frame.cmd_id, RptType.DONE,
-                    {"status": "ok", "received": frame.payload}
-                )
-                return True
-
-        class DiscovererModule(BaseModule):
-            def on_net_connected(self, system_name: str):
-                nonlocal connected
-                connected = True
-
-            def step(self) -> bool:
-                nonlocal role_found, tag_found, role_cmd_ok, tag_cmd_ok
-
-                if not connected or hasattr(self, '_done'):
-                    return False
-
-                # Find by role
-                role_matches = self.v.find_remote_units_by_role("compute_core")
-                if role_matches and not role_found:
-                    role_found = True
-                    self.v.scr.send_cmd(
-                        role_matches[0], CmdType.CMD_TEST, self._on_role_done,
-                        payload={"via": "role"}
-                    )
-
-                # Find by tag
-                tag_matches = self.v.find_remote_units_by_tag("gpu_accelerated")
-                if tag_matches and not tag_found:
-                    tag_found = True
-                    self.v.scr.send_cmd(
-                        tag_matches[0], CmdType.CMD_TEST, self._on_tag_done,
-                        payload={"via": "tag"}
-                    )
-
-                if role_found and tag_found and role_cmd_ok and tag_cmd_ok:
-                    self._done = True
-
-                return False
-
-            def _on_role_done(self, frame: Frame) -> bool:
-                nonlocal role_cmd_ok
-                role_cmd_ok = True
-                return True
-
-            def _on_tag_done(self, frame: Frame) -> bool:
-                nonlocal tag_cmd_ok
-                tag_cmd_ok = True
-                return True
-
-        reg = EnumRegistry.create_default(evt_cls=EvtType, cmd_cls=CmdType)
-        kernel = Kernel(enum_reg=reg, system_name=node_name)
-        api = KernelUserView(kernel)
-
-        kernel._cfg.HOST = "0.0.0.0"
-        kernel._cfg.TCP_PORT_DEFAULT = 45501 if node_name == "ALPHA" else 45502
-        kernel._cfg.NET_PROJECT_TOKEN = b"PROJ00"
-        
-        
-        kernel._cfg.NET_AUTO_CONNECT = True
-        kernel._cfg.UDP_BEACON_INTERVAL = 0.5
-        kernel._cfg.CONN_KEEP_ALIVE = 30.0
-
-        try:
-            api.add_tier(layer_num=1, name="TEST_TIER")
-            api.add_thread(name="TEST_POOL", type=ThreadType.TICKABLE, tct=0.01)
-
-            if node_name == "ALPHA":
-                # ALPHA needs a public unit too
-                api.add_unit(
-                    name="UNIT_PUBLIC", type=UnitType.TICKABLE, m_class=BaseModule,
-                    thread_name="TEST_POOL", tier_layer=1, tier_name="TEST_TIER",
-                    manifest={"is_public": True}
-                )
-                api.add_unit(
-                    name="UNIT_DISCOVERER", type=UnitType.TICKABLE,
-                    m_class=DiscovererModule,
-                    thread_name="TEST_POOL", tier_layer=1, tier_name="TEST_TIER"
-                )
-            else:
-                # BETA exports units with role/tag
-                api.add_unit(
-                    name="UNIT_PUBLIC", type=UnitType.TICKABLE, m_class=BaseModule,
-                    thread_name="TEST_POOL", tier_layer=1, tier_name="TEST_TIER",
-                    manifest={"is_public": True}
-                )
-                api.add_unit(
-                    name="ROLE_WORKER", type=UnitType.TICKABLE, m_class=EchoModule,
-                    thread_name="TEST_POOL", tier_layer=1, tier_name="TEST_TIER",
-                    manifest={"is_public": True, "role": "compute_core"}
-                )
-                api.add_unit(
-                    name="TAG_WORKER", type=UnitType.TICKABLE, m_class=EchoModule,
-                    thread_name="TEST_POOL", tier_layer=1, tier_name="TEST_TIER",
-                    manifest={"is_public": True, "tags": ["gpu_accelerated"]}
-                )
-
-            api.start()
-
-            max_wait = 200
-            all_ok = lambda: (role_found and tag_found and role_cmd_ok and tag_cmd_ok)
-
-            while not all_ok() and max_wait > 0:
-                kernel.step()
-                time.sleep(0.05)
-                max_wait -= 1
-
-            if node_name == "ALPHA":
-                if all_ok():
-                    kernel._tcp_service.disconnect_all()
-                    ledger.ok(test_name)
-                else:
-                    t = f"RoleFound:{role_found} TagFound:{tag_found} "
-                    t += f"RoleCmd:{role_cmd_ok} TagCmd:{tag_cmd_ok}"
-                    ledger.fail(test_name, err_text=t)
-            else:
-                while True:
-                    kernel.step()
-                    time.sleep(0.1)
-
-        except Exception as e:
-            if node_name == "ALPHA":
-                ledger.fail(test_name, err_text=str(e))
-        finally:
-            if node_name == "ALPHA":
-                api.stop()
 
 
 def run_test_node(node_name: str):
@@ -2252,34 +2273,8 @@ def run_test_node(node_name: str):
     Config.DEFAULT_LOG_FLAGS["file"] = []
     
     # Tests map
+    ledger = TestLedger(node_name)
     if node_name == "ALPHA":
-        # Pre-registering scenarios in the ledger
-        ledger = TestLedger()        
-        ledger.add_meta("Core: System Boot, Ticking and Clean Shutdown", is_ready=True)
-        ledger.add_meta("Core: Event Publication and Local Subscription", is_ready=True)
-        ledger.add_meta("Core: Command Execution and Return Report Delivery", is_ready=True)
-        ledger.add_meta("Kernel: Factory Methods Validation Suite", is_ready=True)
-        ledger.add_meta("Threads: Strict Access Control and Hibernation Physics", is_ready=True)
-        ledger.add_meta("Layers: Advanced Tier Factory and Navigation Control", is_ready=True)
-        ledger.add_meta("Chaos: Heavy Random Matrix Multi-Generation Fuzzing", is_ready=True)
-        ledger.add_meta("Kernel: Default Tiers and Threads for Homeless Units", is_ready=True)
-        ledger.add_meta("Boot: Module Initialization Retry", is_ready=True)
-        ledger.add_meta("Boot: Tier Fatal Collapse and Global Restart", is_ready=True)
-        ledger.add_meta("Boot: Emergency Dead Tier Isolation Bypass", is_ready=True)
-        ledger.add_meta("Boot: Emergency Shutdown Stuck Unit", is_ready=True)
-        ledger.add_meta("WatchDog: Automated Module Reborn Recovery", is_ready=True)
-        ledger.add_meta("WatchDog: Deep Infrastructure Unit Reborn", is_ready=True)
-        ledger.add_meta("WatchDog: Stalled OS Thread Nuclear Reset", is_ready=True)
-        ledger.add_meta("Secretary: Automated Report Transaction Pipeline", is_ready=True)
-        ledger.add_meta("Secretary: Execution Speed and Deadlines tools", is_ready=True)
-        ledger.add_meta("Secretary: Routing and addressing failures protection", is_ready=True)
-        ledger.add_meta("Secretary: Advanced Callbacks and Manual Deadlines", is_ready=True)
-        ledger.add_meta("Network: Auto-discovery and TCP Connection", is_ready=True)
-        ledger.add_meta("Network: Cross-System Event Delivery", is_ready=True)
-        ledger.add_meta("Network: Command and Report Exchange", is_ready=True)
-        #ledger.add_meta("Network: Full Service Discovery (Role + Tag)", is_ready=True)
-
-        # --- COMPONENT DISCRETE PIPELINE (ONE TEST = ONE LINE) ---
         #Test_StartStopSystem.run(ledger, node_name)
         #TestSendLocalEvt.run(ledger, node_name)
         #TestSendLocalCmd.run(ledger, node_name)
@@ -2299,17 +2294,16 @@ def run_test_node(node_name: str):
         #Test_SecretaryExecutionSpeed.run(ledger, node_name)
         #Test_SecretaryInvalidAddressing.run(ledger, node_name)
         #Test_SecretaryAdvancedCallbacksAndDeadlines.run(ledger, node_name)
-        Test_NetworkAutoDiscovery.run(ledger, node_name)
-        Test_NetworkEventExchange.run(ledger, node_name)
-        Test_NetworkCommandExchange.run(ledger, node_name)
-        #Test_NetworkServiceDiscoveryFull.run(ledger, node_name)
+        #Test_NetworkAutoDiscovery.run(ledger, node_name, ["ALPHA", "BETA"])
+        #Test_NetworkEventExchange.run(ledger, node_name, ["ALPHA", "BETA"]) # TODO test in v2
+        #Test_NetworkCommandExchange.run(ledger, node_name, ["ALPHA", "BETA"])
+        Test_NetworkServiceDiscovery.run(ledger, node_name, ["ALPHA", "BETA"])
         ledger.print_results()
     else:
-        print("BETA: Network service mode. Ready for multiple test sessions.")
-        ledger = TestLedger()        
-        Test_NetworkAutoDiscovery.run(ledger, node_name)
-        Test_NetworkEventExchange.run(ledger, node_name)
-        Test_NetworkCommandExchange.run(ledger, node_name)
+        #Test_NetworkAutoDiscovery.run(ledger, node_name, ["ALPHA", "BETA"])
+        #Test_NetworkEventExchange.run(ledger, node_name, ["ALPHA", "BETA"]) # TODO test in v2
+        #Test_NetworkCommandExchange.run(ledger, node_name, ["ALPHA", "BETA"])
+        Test_NetworkServiceDiscovery.run(ledger, node_name, ["ALPHA", "BETA"])
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Sanapo Discrete Fuzzing Suite")

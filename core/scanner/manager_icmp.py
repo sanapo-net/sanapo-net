@@ -42,9 +42,6 @@ class ManagerICMP():
         self._scan_profiles: dict[SpeedShiftICMP, IntervalMap] = None
         self._uids_by_latency: list[int] = None
 
-
-        print(json.dumps(self._tick_schedule, indent=4, default=str)) # TODO del it in realise
-
         self._secr.configure_subscriptions(events={
             EvtType.TICK_05: self._on_tick,
             EvtType.TICK_1: self._on_tick,

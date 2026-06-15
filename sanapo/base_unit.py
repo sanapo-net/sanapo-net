@@ -196,6 +196,7 @@ class BaseUnit():
         rules = self._step_map.get(self.stat, {}).get(self.type)
         was_work = False
         if rules:
+            # TODO check it
             if rules[0] and self._secr: self._secr._step()
             if rules[1] and self._module:
                 self._module.step()
@@ -281,27 +282,27 @@ class BaseUnit():
         self.start_timeout = target_start
         self.stop_timeout = target_stop
 
-    def on_net_connected(self, frame: Frame) -> None:
-        """System bridge to forward connection event to the user module."""
+    def on_net_ready(self, frame: Frame) -> None:
+        """System bridge to forward connection+manifest event to the user module."""
         system_name = frame.payload.get("sys_name")
         if system_name:
-            if self._module and hasattr(self._module, 'on_net_connected'):
-                self._logger.dbg("try call Module.on_net_connected")
+            if self._module:
+                self._logger.dbg("try call Module.on_net_ready")
                 try:
-                    self._module.on_net_connected(system_name)
+                    self._module.on_net_ready(system_name)
                 except Exception as e:
-                    self._logger.err("user on_net_connected callback crashed: {e}", e=e)
+                    self._logger.err("calling on_net_ready crashed: {e}", e=e)
 
     def on_net_disconnected(self, frame: Frame) -> None:
         """System bridge to forward disconnection event to the user module."""
         system_name = frame.payload.get("sys_name")
         if system_name:
-            if self._module and hasattr(self._module, 'on_net_disconnected'):
+            if self._module:
                 self._logger.dbg("try call Module.on_net_disconnected")
                 try:
                     self._module.on_net_disconnected(system_name)
                 except Exception as e:
-                    self._logger.err("user on_net_disconnected callback crashed: {e}", e=e)
+                    self._logger.err("calling on_net_disconnected crashed: {e}", e=e)
 
 
 
@@ -371,13 +372,11 @@ class UnitModuleView:
 
     def get_active_systems(self) -> list[str]:
         """Returns a list of all currently connected remote system names."""
-        broker = self._unit._broker
-        if hasattr(broker, '_federation_routes'):
-            return list(broker._federation_routes.keys())
-        return []
+        return [k for k, v in self._unit._broker._federation_ready.items() if v]
 
-    def get_remote_units(self, system_name: str) -> list[str]:
-        """Returns a list of all registered public unit names of a specific remote node."""
+
+    def get_remote_addrs_by_sys(self, system_name: str) -> list[str]:
+        """Returns a list of all registered addrs public unit names by system name"""
         broker = self._unit._broker
         prefix = f"{system_name}:"
         with broker._addr_lock:
@@ -388,26 +387,26 @@ class UnitModuleView:
                 if k.startswith(prefix)
             ]
         
-    def find_remote_units_by_role(self, role: str) -> list[Addr]:
+    def get_remote_addrs_by_role(self, role: str) -> list[Addr]:
         """Finds logic addresses of all remote units matching a specific role string."""
         broker = self._unit._broker
         found_addresses = []
         with broker._addr_lock:
             for addr_str, m_dict in broker._remote_manifests.items():
                 # Direct string comparison bypasses any registry or enum mismatch issues
-                if m_dict.get("role") == role:
+                if m_dict and m_dict.get("role") == role:
                     addr_obj = broker.get_addr(addr_str, create=False, find=True)
                     if addr_obj:
                         found_addresses.append(addr_obj)
         return found_addresses
 
-    def find_remote_units_by_tag(self, tag: str) -> list[Addr]:
+    def get_remote_addrs_by_tag(self, tag: str) -> list[Addr]:
         """Finds logic addresses of all remote units possessing a specific tag string."""
         broker = self._unit._broker
         found_addresses = []
         with broker._addr_lock:
             for addr_str, m_dict in broker._remote_manifests.items():
-                if tag in m_dict.get("tags", []):
+                if tag in m_dict.get("tags") or ():
                     addr_obj = broker.get_addr(addr_str, create=False, find=True)
                     if addr_obj:
                         found_addresses.append(addr_obj)

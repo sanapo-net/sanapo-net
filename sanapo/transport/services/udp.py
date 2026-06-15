@@ -68,7 +68,8 @@ class UdpListener(threading.Thread):
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             # Bind to all interfaces to catch broadcasts
             sock.bind(('', self._cfg.UDP_PORT_DEFAULT))
-            sock.settimeout(0.2) 
+            sock.settimeout(0.2)
+            self._flush_buffer(sock)
             self._log.inf("UDP: Listener active, waiting for neighbors...")
             
             while self._is_running:
@@ -80,26 +81,35 @@ class UdpListener(threading.Thread):
                 except Exception as e:
                     self._log.err("UDP: Listener error: {e}", e=e)
 
+
+    def _flush_buffer(self, sock: socket.socket):
+        """Discard all pending datagrams currently sitting in the OS socket buffer."""
+        old_timeout = sock.gettimeout()
+        try:
+            # Switch to non-blocking mode for fast flushing
+            sock.setblocking(False)
+            while True:
+                sock.recvfrom(65535)
+        except BlockingIOError:
+            pass
+        finally:
+            sock.settimeout(old_timeout)
+
     def _process_beacon(self, data: bytes, addr: tuple):
         """Parses incoming beacon and initiates TCP connection if new."""
-        if not getattr(self._cfg, 'NET_AUTO_CONNECT', True):
-            return
-        if True:#try:
+        if not self._cfg.NET_AUTO_CONNECT: return
+        try:
             if len(data) < 16: 
                 return
             
             magic = struct.unpack('>8s', data[:8])[0]
-            if magic != self._cfg.MAGIC_HEADER: 
-                return
+            if magic != self._cfg.MAGIC_HEADER: return
 
             _, port, name_len = struct.unpack('>8sII', data[:16])
             remote_name = data[16:16+name_len].decode('utf-8')
 
-            if remote_name == self._cfg.SYSTEM_NAME: 
-                return
-
-            if self._tcp_service.is_conn_alive(remote_name):
-                return
+            if remote_name == self._cfg.SYSTEM_NAME: return
+            if self._tcp_service.is_conn_alive(remote_name): return
 
             # HARD CORE LOCALHOST PAD: Extract current physical interface IP interface card
             target_ip = addr[0]
@@ -117,6 +127,6 @@ class UdpListener(threading.Thread):
             # Instruct the framework service to connect via secure loopback routing
             self._tcp_service.connect_to(target_ip, port)
             
-        #except Exception as e:
-        #    # TODO in v2: refact it
-        #    print("UDP: process beacon problems: {e}")
+        except Exception as e:
+            # TODO in v2: refact it
+            print("UDP: process beacon problems: {e}")
