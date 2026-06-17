@@ -34,7 +34,6 @@ class MessageBroker:
         # Routing tables
         self._local_routes: dict[str, BaseAdapterTransport] = {}
         self._federation_routes: dict[str, BaseAdapterTransport] = {}
-        self._federation_ready: dict[str, bool] = {}
         self._addr_book: dict[str, Addr] = {}
         self._local_manifests: dict[str, Manifest] = {}
         self._remote_manifests: dict[str, dict] = {}
@@ -53,12 +52,23 @@ class MessageBroker:
         """Registers a local route using the address already stored in the transport."""
         addr_str = transport.sanapo_addr.unit
         self._local_routes[addr_str] = transport
-        self._log.inf("BROKER: unit {addr} is registred as local", addr=addr_str)
+        self._log.inf("BROKER: Unit {addr} is registred", addr=addr_str)
 
-    def register_federation_route(self, system_name: str, transport: BaseAdapterTransport):
+    # TODO in v2: here add EVT and CMD
+    def register_federation_route(self, transport: BaseAdapterTransport, data: dict) -> None:
         """Registers a link to another sanapo instance."""
+        system_name = transport.sanapo_addr.system
         self._federation_routes[system_name] = transport
-        self._log.inf("BROKER: Federation link to '{name}' active", name=system_name)
+        manifests = data["manifests"]
+        for addr_str, m_dict in manifests.items():
+            self.get_addr(addr_str, create=True, find=False)
+            self._remote_manifests[addr_str] = m_dict
+        t = "BROKER: registered manifests from '{sys}': {count}"
+        self._log.inf(t, sys=system_name, count=len(manifests))
+        #events = data["events"]
+        #commands = data["commands"]
+        self._log.inf("BROKER: Connection with '{name}' registred", name=system_name)
+        self.broadcast_sys_message(SysType.NET_READY, {"sys_name": system_name})
 
     def step(self) -> bool:
         """Process a slice of messages from the global bus."""
@@ -114,15 +124,11 @@ class MessageBroker:
             fed_transport = self._federation_routes.get(target_addr.system)
             if fed_transport:
                 return fed_transport.send(frame)
-        
-        return False
     
     def broadcast_sys_message(self, sys_type: SysType, payload: dict) -> None:
         """Clones and delivers a system message to all currently registered local units."""
         for unit_name, transport in self._local_routes.items():
-            if unit_name == self._cfg.ADDR_KERNEL_STR: 
-                continue
-                
+            if unit_name == self._cfg.ADDR_KERNEL_STR: continue
             msg = {
                 "msg_type": "sys",
                 "sub_type": sys_type.value if hasattr(sys_type, 'value') else str(sys_type),
@@ -130,9 +136,7 @@ class MessageBroker:
                 "recipient": f"{self._cfg.SYSTEM_NAME}:{unit_name}",
                 "payload": payload
             }
-            # NATIVE USE: We use the framework's native send() method to push frames safely
-            if hasattr(transport, 'send'):
-                transport.send(msg)
+            transport.send(msg)
 
     def _handle_system(self, frame: Frame):
         """Manages dynamic event subscriptions."""
@@ -214,18 +218,3 @@ class MessageBroker:
                 addr_str = f"{self._cfg.SYSTEM_NAME}:{u_name}"
                 public_maps[addr_str] = manifest.to_dict()
         return public_maps
-    
-    def on_net_manifest_received(self, frame: Frame) -> None:
-        remote_system = frame.payload.get("sys_name")
-        remote_manifests = frame.payload.get("manifests", {})
-        t = "BROKER: received {count} manifests from {sys}"
-        self._log.inf(t, count=len(remote_manifests), sys=remote_system)
-        
-        # Save raw manifest dictionaries directly into the broker's cache
-        for addr_str, m_dict in remote_manifests.items():
-            self.get_addr(addr_str, create=True, find=False)
-            self._remote_manifests[addr_str] = m_dict
-        t = "BROKER: Registered and cached {count} passports from '{sys}'"
-        self._log.inf(t, count=len(remote_manifests), sys=remote_system)
-        self._federation_ready[remote_system] = True
-        self.broadcast_sys_message(SysType.NET_READY, {"sys_name": remote_system})

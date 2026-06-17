@@ -31,9 +31,7 @@ class KernelSecretary(Secretary):
     # TODO del SUB UNSUB SUB_SETUP there
     def auto_subscribe(self) -> None:
         self._handlers_sys: dict[SysType, callable] = {
-            SysType.NET_CONNECTED: self._kernel.on_net_connected,
             SysType.NET_DISCONNECTED: self._kernel.on_net_disconnected,
-            SysType.NET_MANIFEST_RECEIVED: self._kernel.on_net_manifest_received,
             SysType.SUB: lambda frame: True,
             SysType.UNSUB: lambda frame: True,
             SysType.SUB_SETUP: lambda frame: True,

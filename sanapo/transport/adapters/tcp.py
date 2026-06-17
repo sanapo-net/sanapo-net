@@ -14,7 +14,8 @@ if TYPE_CHECKING:
 
 class TcpAdapterTransport(BaseAdapterTransport):
     """TCP Transport Adapter. Handles network delivery and frame reconstruction."""
-    def __init__(self, sanapo_addr: Addr, sys_name: str, host: str | None, port: int | None, service: TcpService):
+    def __init__(self, sanapo_addr: Addr, sys_name: str, service: TcpService, 
+                 host: str | None = None, port: int | None = None) -> None:
         # Explicit and strict check for the presence of a device's physical host
         spec = (host, port) if (host is not None and port is not None) else sys_name
         super().__init__(sanapo_addr=sanapo_addr, spec_addr=spec)
@@ -25,25 +26,36 @@ class TcpAdapterTransport(BaseAdapterTransport):
         self._inbox: queue.Queue[dict] = queue.Queue()
 
     def send(self, payload: Frame | dict) -> bool:
-        """
-        Smart forwarding for both Federation links and dedicated raw TCP units.
-        Accepts both Frame and raw dict payloads.
-        """
-        if not self.is_ready():
-            return False
+        if not self.is_ready(): return False
         try:
-            # Packed byte JSON is always sent to the network
-            raw_dict = payload.to_dict() if isinstance(payload, Frame) else payload
-            raw_data = json.dumps(raw_dict).encode('utf-8')
+            if isinstance(payload, Frame):
+                raw_dict = payload.to_dict()
+            else:
+                raw_dict = payload
 
-            # Если в spec_addr лежит строка (имя внешней системы федерации)
+            msg_type_str = raw_dict.get("msg_type")
+            if msg_type_str == "sys":
+                numeric_type = 10
+            elif msg_type_str == "rpt":
+                numeric_type = 11
+            elif msg_type_str == "cmd":
+                numeric_type = 12
+            elif msg_type_str == "evt":
+                numeric_type = 13
+            else:
+                return False
+
+            data_bytes = json.dumps(raw_dict).encode("utf-8")
+
             if isinstance(self.spec_addr, str):
-                return self._service.send_to_system(self.spec_addr, raw_data)
-            
-            # Если в spec_addr лежит кортеж (host, port) — это наш "откомандированный" юнит
-            return self._service.send_to_addr(self.spec_addr, raw_data)
-            
-        except Exception:
+                return self._service.send_to_system(
+                    self.spec_addr, numeric_type, data_bytes
+                )
+            return self._service.send_to_addr(
+                self.spec_addr, numeric_type, data_bytes
+            )
+        except Exception as e:
+            print(f"TcpAdapterTransport err: {e}") # TODO in v2: refact it
             return False
 
     def inject_received(self, data: dict) -> None:

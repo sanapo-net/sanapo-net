@@ -574,41 +574,34 @@ class Kernel:
         self._broker.set_tcp_service(self._tcp_service)
         self._tcp_service.start()
 
-        # Check if the discrete environment requires background discovery beacon loops
-        if getattr(self._cfg, 'NEEDS_NET_AUTO_CONNECT', True):
+        # Start beacon and listener if allowed
+        if self._cfg.NET_BEACON:
             self._udp_beacon = UdpBeacon(config=self._cfg, logger=self._log)
-            self._udp_listener = UdpListener(config=self._cfg, logger=self._log, 
+            self._udp_listener = UdpListener(config=self._cfg, logger=self._log,
                                              tcp_service=self._tcp_service)
             self._tcp_service._udp_beacon = self._udp_beacon
-            
             self._udp_beacon.start()
             self._udp_listener.start()
         else:
             self._log.inf("Network: Automatic discovery beacon loops disabled by configuration.")
 
     def _stop_network(self) -> None:
-        """Gracefully disconnects links and forces thread joins to clear RAM footprints."""
-        # 1. Trigger asynchronous stop flags across the network layer layouts
-        if getattr(self, '_udp_beacon', None):
-            self._udp_beacon._is_running = False
-        if getattr(self, '_udp_listener', None):
-            self._udp_listener._is_running = False
-        if getattr(self, '_tcp_service', None):
-            self._tcp_service._is_running = False
-            self._tcp_service.disconnect_all()
-
-        # 2. Sequential Thread Join Block: Give OS enough time to flush threads from memory
-        # We access python threading references safely via the object handles
-        if getattr(self, '_tcp_service', None) and self._tcp_service.is_alive():
-            self._tcp_service.join(timeout=0.2)
-            
-        if getattr(self, '_udp_beacon', None) and self._udp_beacon.is_alive():
-            self._udp_beacon.join(timeout=0.2)
-            
-        if getattr(self, '_udp_listener', None) and self._udp_listener.is_alive():
-            self._udp_listener.join(timeout=0.2)
-            
-        self._log.dbg("All core network service thread contexts joined successfully.")
+        """Gracefully disconnects links and forces thread joins."""
+        for name in ('_udp_beacon', '_udp_listener', '_tcp_service'):
+            obj = getattr(self, name, None)
+            if obj:
+                if hasattr(obj, '_is_running'):
+                    obj._is_running = False
+                if name == '_tcp_service':
+                    obj.disconnect_all()
+                    obj.shutdown()
+        
+        for name in ('_tcp_service', '_udp_beacon', '_udp_listener'):
+            obj = getattr(self, name, None)
+            if obj and hasattr(obj, 'join'):
+                obj.join(timeout=0.2)
+        
+        self._log.dbg("Network services stopped.")
 
 
     # --- Consistency (Persistence) ---
@@ -784,15 +777,10 @@ class Kernel:
         """
         return Frame.from_dict(data, self._reg, self._broker)
     
-    def on_net_connected(self, frame: Frame) -> None:
-        remote_system = frame.payload.get("sys_name")
-        self._broker._federation_ready[remote_system] = False
-        self._log.inf("Kernel: Federation link confirmed with system '{s}'", s=remote_system)
-
+    # TODO mpve it to broker
     def on_net_disconnected(self, frame: Frame) -> None:
         remote_system = frame.payload.get("sys_name")
-        self._broker._federation_ready.pop(remote_system, None)
-        self._log.wrn("Kernel: Federation link with system '{s}' lost. Cleaning up topology.", 
+        self._log.wrn("Kernel: Connection with '{s}' lost, cleaning up topology", 
                       s=remote_system)
         
         # 1. Remove the federation route so the broker stops sending messages to a dead link
@@ -815,9 +803,6 @@ class Kernel:
         # 3. Notify all local application modules about the disconnect
         self._broker.broadcast_sys_message(SysType.NET_DISCONNECTED, {"sys_name": remote_system})
 
-
-    def on_net_manifest_received(self, frame: Frame) -> None:
-        self._broker.on_net_manifest_received(frame)
 
     # Callback for WatchDog: Exposes live active thread pools dict cleanly
     def get_managers(self) -> dict[str, ThreadManager]:

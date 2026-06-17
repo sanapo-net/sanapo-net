@@ -1,5 +1,5 @@
 # sanapo/enums.py
-from enum import Enum, unique
+from enum import Enum, unique, auto
 from dataclasses import dataclass
 from typing import Type
 
@@ -66,9 +66,7 @@ class SysType(BriefEnumMixin, str, Enum):
     U_REBORN = "u_reborn"
     U_MUTATE = "u_mutate"
     # Transport
-    RAW = "raw"
-    NET_CONNECTED = "net_connected"
-    NET_MANIFEST_RECEIVED = "net_manifest_received"
+    RAW = "raw" # TODO ???
     NET_READY = "net_ready"
     NET_DISCONNECTED = "net_disconnected"
 
@@ -162,6 +160,17 @@ class TranspReadStat(BriefEnumMixin, str, Enum):
     CORRUPTED = "corrupted"
     INCOMPLETE = "incomplete"
     AUTH_FAILED = "auth_failed"
+
+# TCP
+@unique
+class ConnState(Enum):
+    IDLE = auto()
+    SENT_CONN_REQ = auto()
+    WAIT_TOKEN_RETURN = auto()
+    WAIT_ACCEPT = auto()
+    ACTIVE = auto()
+    CLOSING = auto()
+    CLOSED = auto()
 
 # Register
 @dataclass

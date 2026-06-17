@@ -24,3 +24,7 @@
 ## Del feature: Maybe delete email transport: keep only Queue and TCP
 ## Add feature: Add ability to adjust logger settings individually for each logger object
 ## Add feature: Make it possible to send a manifest both as a dictionary and as an object
+
+## Create RemoteSystem class
+## Create Use Class Manifest in unit creating
+## If there are not public Mudules, beacon and listener turn off

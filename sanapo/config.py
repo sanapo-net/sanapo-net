@@ -16,12 +16,12 @@ class Config():
     PATH_LOGS = "logs/"
     DEFAULT_LOG_FLAGS = {
         "console": [Logs.CRT, Logs.ERR, Logs.WRN, Logs.INF, Logs.DBG],
-        "file": [Logs.CRT, Logs.ERR, Logs.WRN, Logs.INF, Logs.DBG]
+        "file": []#[Logs.CRT, Logs.ERR, Logs.WRN, Logs.INF, Logs.DBG]
     }
 
     # TODO make another timings for net addrs
     # Secretary.
-    DEFAULT_CMD_DEADLINE_ANSW = 0.100     # seconds
+    DEFAULT_CMD_DEADLINE_ANSW = 0.150     # seconds
     DEFAULT_CMD_DEADLINE_DONE = 0.400     # seconds
     DEFAULT_TIME_EXTENSION = 0.200        # seconds
     DEADLINE_EXTENSION_THRESHOLD = 0.050  # seconds
@@ -50,26 +50,32 @@ class Config():
 
     # Transport.
     MAGIC_HEADER = b"SanaPo10"
+    NET_PROJECT_TOKEN = b"PROJ00"
     TCP_PORT_DEFAULT = 50000
     UDP_PORT_DEFAULT = 50000
     HANDSHAKE_TIMEOUT = 5.000
     SYSTEM_NAME = 'SANAPO_FW'
     HOST = '0.0.0.0'
-    UDP_BEACON_INTERVAL = 10.000
-    CONN_KEEP_ALIVE = 30.000
-    NET_AUTO_CONNECT = True
-    NEEDS_NET_AUTO_CONNECT = True
-    NET_STRICT_HANDSHAKE = True
+    NET_ALLOWED_IPS = ["127.0.0.1", "192.168.4.100", "192.168.4.101"]
 
-    # Network Security and Cross-Platform Federation
-    # If True, bypass NET_PROJECT_TOKEN verification if password matches
-    NET_ALLOW_CROSS_DISTRIB: bool = False
-    # Secret phrase used for cryptographic HMAC handshake
-    NET_PASSWORD: str = "DEFAULT_SANAPO_PASS"
+    # Beacon
+    NET_BEACON: bool = True                  # Enable beacon sending
+    BEACON_SHORT_DURATION: float = 5.0       # Short interval duration
+    BEACON_SHORT_INTERVAL: float = 5.0       # Short interval
+    BEACON_LONG_INTERVAL: float = 30.0       # Long interval
+    NET_AUTO_CONNECT_BY_BEACON: bool = True  # Auto-connect on beacon
+    NET_PROJECT_MONO: bool = True            # Strict project token
+    NET_MULTI_CONNECT_IN: bool = True
+    NET_MULTI_CONNECT_OUT: bool = True
+    CONN_WAIT_ANSW_MAX: float = 3.0
 
-    # Security V1
-    NET_PROJECT_TOKEN = b"PROJ00" # secret marker
-    NET_ALLOWED_IPS = ["127.0.0.1", "192.168.4.100", "192.168.4.101"] # white list. [] for all
+    # Keep-Alive
+    CONN_KEEP_ALIVE: bool = True             # Keep connection alive
+    CONN_KEEP_ALIVE_MAX: float = 30.0        # Idle time before ping
+
+    # Security / Encryption
+    NET_PASSWORD: str | bytes = None         # Password for XOR encryption
+    NET_MAX_MSG_SIZE: int = 10 * 1024 * 1024 # Max message size (bytes)
 
     # Broker.
     ADDR_BROKER_STR = "BROKER"

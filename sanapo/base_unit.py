@@ -44,6 +44,7 @@ class BaseUnit():
         self._needs_rebirth: bool = False
         self._module_needs_start: bool = False
         self._needs_stop: bool = False
+        self._need_call_on_net_ready: bool = False
 
         self._deadline: float | None = None
         self.stop_timeout: float = config.UNIT_STOP_TIMEOUT
@@ -192,7 +193,12 @@ class BaseUnit():
                 return True
             else:
                 return False
-
+            
+        if self._need_call_on_net_ready:
+            self._need_call_on_net_ready = False
+            for system in self._broker._federation_routes.keys():
+                self._module.on_net_ready(system)
+            
         rules = self._step_map.get(self.stat, {}).get(self.type)
         was_work = False
         if rules:
@@ -215,6 +221,7 @@ class BaseUnit():
     def started(self) -> None:
         self._deadline = None
         self._logger.dbg("UNIT: started")
+        self._need_call_on_net_ready = True
         self.stat = UnitStat.WORKING
     
     def sleep(self) -> None:
@@ -370,9 +377,9 @@ class UnitModuleView:
     def addr_by_str(self, addr_str: str) -> BaseUnit | None:
         return self._unit.addr_by_str(addr_str, create=False, find=True)
 
-    def get_active_systems(self) -> list[str]:
-        """Returns a list of all currently connected remote system names."""
-        return [k for k, v in self._unit._broker._federation_ready.items() if v]
+    def get_active_systems(self) -> tuple[str]:
+        """Returns a tuple of all currently connected remote system names."""
+        return tuple(self._unit._broker._federation_routes.keys())
 
 
     def get_remote_addrs_by_sys(self, system_name: str) -> list[str]:
