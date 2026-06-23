@@ -246,7 +246,7 @@ class BaseUnit():
             self._logger.dbg("UNIT: destroy")
         self.stat = UnitStat.DESTROYING
 
-    
+    # TODO in v2: how about appearing TICKABLE in ONLY_EVENT_DRIVEN and EVENT_DRIVEN ?
     def mutate(self, new_type: UnitType) -> bool:
         """Changes unit type on the fly"""
         self._logger.dbg("UNIT: mutate to {type}", type=new_type)

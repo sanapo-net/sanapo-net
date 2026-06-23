@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from sanapo.addr import Addr
 
+# TODO in v2: dont create manifest for ZOMBIE, UTILITY
 @dataclass
 class Manifest:
     addr: Addr               # Logical address (e.g., NODE_A:worker_1)

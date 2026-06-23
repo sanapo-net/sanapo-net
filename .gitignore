@@ -1,4 +1,11 @@
+obsidian/
 .git/
+.pytest_cache/
 venv/
+logs/
+tests/sanapo/logs
+tests/sanapo-net/logs
+tests/core/logs
 *__pycache__
 *.log
+*sanapo.log
