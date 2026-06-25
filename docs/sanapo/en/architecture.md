@@ -1,11 +1,46 @@
 # sanapo Framework Architecture Description
 
+
+## Contents:
+
+- [General Features](#general-features) — brief description of the concept, units, kernel, networking, and lifecycle.
+- [Addresses](#addresses) — structure of module address (system:name) and its role.
+- [Unit](#unit) — isolated computing unit with types, states, and pseudo-cycle.
+- [Module](#module) — user code (inherits BaseModule), entry points start/stop.
+- [Secretary](#secretary) — communication interface: commands, events, reports, subscriptions.
+- [Logger](#logger) — logging to console/file with levels and built-in translator.
+- [Threads](#threads) — thread management, types, runner agent, hibernation.
+- [Tiers](#tiers) — groups of units that start and stop together in order.
+- [Kernel](#kernel) — main orchestrator, registries, lifecycle, persistence, network callbacks.
+- [Boot Master](#boot-master) — controls startup and shutdown by tiers with visualization.
+- [Watchdog](#watchdog) — monitors stuck threads and performs forced reset.
+- [Message Broker](#message-broker) — message routing, local and remote routes.
+- [Transport Adapters](#transport-adapters) — delivery abstractions (queue, TCP and others).
+- [Protocols](#protocols) — Frame structure, serialization, validation, network specifics.
+- [Manifest](#manifest) — unit passport (role, tags, publicity, version).
+- [UDP Services: Beacon and Listener](#udpservicesservicesbeaconandandlistener) — LAN discovery via UDP beacons.
+- [TCP Service](#tcp-service) — reliable connections between systems, handshake, encryption.
+- [User Interfaces](#user-interfaces) — facades for application programmers (KernelUserView, UnitModuleView).
+- [Miscellaneous](#miscellaneous) — additional modules, many questionable for v2:
+    - [Module Config](#module-config) — framework settings.
+    - [Module Enums](#module-enums) — named constants for type safety.
+    - [Class EnumRegistry](#class-enumregistry) — registration of user Enums for serialization.
+    - [Boot Visualization](#boot-visualization) — GUI/CUIprogressbars(untested).
+    - [Class BriefEnumMixin](#class-briefenummixin) — unused, simplifieslogs.
+    - [Class Translator](#class-translator) — localization(questionable).
+    - [E-mail Transport and Service](#e-mail-transport-and-service) — unused, proof of concept.
+    - [Restrictive Interfaces (views)](#restrictive-interfaces-views) — internal View classes (questionable).
+
+
 ## General Features
 The sanapo framework is built around the idea of isolated computing units — units that communicate through a thread-safe message bus. Each unit lives inside a thread (one of many), inside a tier (one of many), and knows nothing about the others directly — only through addresses and messages. The Kernel orchestrates the creation, startup, shutdown, and destruction of all components. The application programmer writes only modules (inheriting from BaseModule) and configures the system through KernelUserView. Everything else is the framework's responsibility.
 
 The system can be either standalone or networked with other sanapo systems via TCP (on top of UDP beacons for discovery). Network connections are established automatically when the project token and password match. Modules can search for remote units by roles and tags, sending them commands and events just like local ones.
 
 System lifecycle: configuration → boot (BootMaster) → operation (Kernel.step loop) → shutdown (BootMaster.shutdown) → completion.
+
+[Contents](#contents)
+
 
 ## Addresses
 _(class `Addr`)_
@@ -14,6 +49,9 @@ For each module to be able to send and receive messages to other modules — the
 A module's address consists of two parts: the system name and its own name. As a string, it looks like two strings joined by a colon.
 Modules written by application programmers must have their own names; the instance of a program built on the sanapo framework also has a name. An address is formed from these two names. It is implemented as an object and can be output and parsed as a string.
 A valid address applies only to modules that have their own secretary, with a couple of exceptions inside the framework.
+
+[Contents](#contents)
+
 
 ## Unit
 _(class `BaseUnit`)_
@@ -48,6 +86,9 @@ The unit intermediary manipulates the module and the [secretary](#secretary): ca
 
 A unit can mutate — change its type on the fly; a special method exists for this.
 
+[Contents](#contents)
+
+
 ## Module
 _(class `BaseModule`)_
 
@@ -61,6 +102,9 @@ The module must have `start` and `stop` methods as mandatory. This is where the 
 
 The module can subscribe to events and commands within the system and beyond via the secretary.
 In the module, one can change the maximum durations for executing the `start`, `stop`, and `step` methods, change the module's manifest data, and more.
+
+[Contents](#contents)
+
 
 ## Secretary
 _(class `Secretary`)_
@@ -98,12 +142,18 @@ The unit is forcibly subscribed by the secretary to manipulations with this unit
 
 All message transmissions and callbacks are thread-safe.
 
+[Contents](#contents)
+
+
 ## Logger
 _(class `Logger`)_
 
 Writes logs to the console and to a file. The level for console output and file writing is defined separately in the configuration.
 In framework version 2, individual logger configuration for each object is planned.
 The logger has a built-in [l18n translator](#translator-class)
+
+[Contents](#contents)
+
 
 ## Threads
 _(class `ThreadManager`)_
@@ -137,6 +187,9 @@ Payload activity is determined by the runner agent reading the boolean flags (`b
 
 A thread can be stopped (`join` operation), started, or reloaded by the [watchdog](#watchdog) and the [boot master](#boot-master).
 
+[Contents](#contents)
+
+
 ## Tiers
 _(class `Tier`)_
 
@@ -165,6 +218,9 @@ A tier tracks the startup/shutdown progress of its units. If some unit does not 
 A tier does not manage threads directly — it works with units, and units are already distributed across threads. The same thread can contain units from different tiers.
 
 A tier can be created manually (specifying a name or number or both) or automatically (when adding a unit to a non-existent tier). Automatically created tiers have the flag `autocreated-True` and can be reused for subsequent units without explicitly specifying a tier (via the LAST/NEW_CREATE/AUTO_CREATING mechanism).
+
+[Contents](#contents)
+
 
 ## Kernel
 _(class `Kernel`)_
@@ -209,6 +265,9 @@ The kernel handles remote system connection and disconnection events:
 **Watchdog and stability:**
 The kernel provides the watchdog with `get_managers` (list of all `ThreadManager`) and `on_thread_stuck` (nuclear reset of a hung thread) methods. When a hang is detected, the thread is forcibly reloaded with all its units.
 
+[Contents](#contents)
+
+
 ## Boot Master
 _(class `BootMaster`)_
 
@@ -244,6 +303,9 @@ If a tier cannot start, the boot master:
 3: If attempts are exhausted — increments the global attempt counter
 4: If the global counter exceeds the limit — calls `restart()` of the entire system
 
+[Contents](#contents)
+
+
 ## Watchdog
 _(class `WatchDog`)_
 
@@ -266,6 +328,9 @@ When the watchdog triggers on a thread:
 3: If reload fails — an error is logged
 
 Thus, a hung thread does not bring down the entire system — it is forcibly reloaded while other threads continue working. This is especially important for systems with multiple threads, where a hang in one (for example, due to blocking I/O in a module) should not stop the others.
+
+[Contents](#contents)
+
 
 ## Message Broker
 _(class `MessageBroker`)_
@@ -297,6 +362,9 @@ Every kernel tick calls `broker.step()`, which:
 **Address book:**
 The broker is the single source of truth for addresses. The `get_addr(addr_str, create, find)` method either finds an existing address or creates a new one (if create-True). This guarantees that two units with the same name in different systems get different Addr objects.
 
+[Contents](#contents)
+
+
 ## Transport Adapters
 _(classes `QueueAdapterTransport`, `TcpAdapterTransport`)_
 
@@ -318,6 +386,9 @@ Transport adapters are an abstraction over the physical message delivery method.
 **Other adapters (inactive in v1):**
 - `EmailAdapterTransport` — sending/reading via email (POP3/IMAP). Proof of concept, not used.
 - In v2, WebSocket, MQTT, and other transports may be added.
+
+[Contents](#contents)
+
 
 ## Protocols
 _(class `Frame`)_
@@ -348,6 +419,9 @@ Frame checks required fields upon creation. For example, for CMD, cmd_type and r
 **Network specifics:**
 When transmitted over the network, Frame becomes JSON, then bytes (UTF-8). On the receiving side: bytes → JSON → dictionary → `Frame.from_dict()`. Enums are restored via the remote system's `EnumRegistry` — this requires the command and event enums to be identical across all project systems.
 
+[Contents](#contents)
+
+
 ## Manifest
 _(class `Manifest`)_
 
@@ -375,6 +449,9 @@ The final manifest is assembled by merging: defaults → module → user. Tags a
 **Example:**
 A logger unit on system Alpha with manifest `[role-"logger", tags-["persistent", "fast"], is_public-True]` will be visible on system Beta. A module on Beta can find it via `self.v.get_remote_addrs_by_role("logger")` and send a command to write a log.
 
+[Contents](#contents)
+
+
 ## UDP Services: Beacon and Listener
 _(classes `UdpBeacon`, `UdpListener`)_
 
@@ -401,6 +478,9 @@ Network discovery in sanapo works via UDP. This allows systems to find each othe
 4: Listener A checks the token → OK → calls `TcpService.connect_to(host_B, port_B)`
 5: `TcpService` A establishes a TCP connection with B
 6: After handshake, the systems exchange manifests
+
+[Contents](#contents)
+
 
 ## TCP Service
 _(classes `TcpService`, `TcpConnection`)_
@@ -439,6 +519,9 @@ The TCP service provides reliable connection between sanapo systems. It operates
 - All local units receive `NET_DISCONNECTED` and can call on_net_disconnected in their modules
 - When the beacon reappears, the connection will be automatically re-established
 
+[Contents](#contents)
+
+
 ## User Interfaces
 _(classes `KernelUserView`, `UnitModuleView`)_
 
@@ -464,6 +547,9 @@ User interfaces (Views) are facades through which the application programmer int
 - `KernelBootMasterView` — restricted kernel access for the boot master (access to tiers, managers, translator, start/stop/restart methods)
 
 The separation into Views allows refactoring the framework internals without breaking application programmers' code — as long as the public View API does not change, modules continue to work.
+
+[Contents](#contents)
+
 
 ## Miscellaneous
 Here is a description of the most changeable modules and classes.
@@ -496,3 +582,5 @@ It may be relevant under conditions of information blockade and total built-in d
 Classes `KernelTierView`, `KernelBootMasterView`.
 **In sanapo v2, possibly to be reduced**. Created as a means to restrict one object from using methods and properties of another object, in this case `Kernel`. There are also definitely necessary user-restricting `UnitModuleView` and `KernelUserView`.
 Since the sanapo framework code is written by a single developer — the necessity of the first two classes is questionable.
+
+[Contents](#contents)

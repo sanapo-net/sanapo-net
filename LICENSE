@@ -16,7 +16,7 @@ Additional Use Grant:
 - Permitted free use for learning, code audit, and skill assessment during hiring.
 - For commercial use, contact the author.
 
-Change Date: 2029-01-01
+Change Date: 2030-01-01
 
 On the Change Date, the License will automatically be changed to Apache 2.0 License.
 
@@ -48,4 +48,4 @@ The project also uses the following permissively licensed libraries (Pillow, pyt
 
 ## Note
 
-LGPL v3 requirements apply only to icmplib and its derivatives. The main project code (sanapo-net) is governed by the Business Source License 1.1 (until 2029‑01‑01) and Apache 2.0 License (afterwards).
+LGPL v3 requirements apply only to icmplib and its derivatives. The main project code (sanapo-net) is governed by the Business Source License 1.1 (until 2030‑01‑01) and Apache 2.0 License (afterwards).

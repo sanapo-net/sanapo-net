@@ -1,4 +1,5 @@
 obsidian/
+scripts/
 .git/
 .pytest_cache/
 venv/
