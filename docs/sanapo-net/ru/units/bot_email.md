@@ -11,7 +11,7 @@ roadmap_idea: []
 # Юнит: BOT_EMAIL
 
 ## Данные
-Модульный класс: [Bot_email](../spec/module_classes/bot_email.md)
+Модульный класс: [bot_email](../spec/module_classes/bot_email.md)
 Поток: BOT_EMAIL
 Слой: BOTS
 Идеи:
