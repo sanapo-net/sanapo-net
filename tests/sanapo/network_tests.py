@@ -10,11 +10,11 @@ from sanapo.protocol import Frame
 from tests.sanapo.infra import Triggers, setup_config
 
 try:
-    from core.drafts.project_enums import EvtType, CmdType
+    from common.enums import EvtType, CmdType
 except ImportError:
     import sys, os
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-    from core.drafts.project_enums import EvtType, CmdType
+    from common.enums import EvtType, CmdType
 
 
 

@@ -321,7 +321,7 @@ class UnitModuleView:
         # --- Shortened Tools ---
         self.cfg: Config = unit._config
         self.log: Logger = unit._logger
-        self.scr: Secretary = unit._secr
+        self.secr: Secretary = unit._secr
         self.addr: Addr = unit.addr
 
         # --- Status Control Signals ---

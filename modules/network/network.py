@@ -63,27 +63,17 @@ class Network(BaseModule):
         light_table = {}
         for uid, iface in self.ifaces.items():
             light_table[uid] = {
-                "uid": iface.uid,
-                "device_uid": iface.device.uid if iface.device else None,
-                "device_name": iface.device.name if iface.device else "",
+                "uid_dev": iface.device.uid if iface.device else None,
                 "ip": iface.ip,
                 "mac": iface.mac,
-                "icmp_interval": iface.icmp_interval,
-                "icmp_timeout": iface.icmp_timeout,
-                "opened_ports": copy.copy(iface.opened_ports)
+                "priority": iface.priority,
+                "timeout": iface.icmp_timeout,
+                "interval": iface.icmp_interval
             }
         self.snapshot_dict = {"ver": self.snapshot_ver, "tab": light_table}
         
         # 2. Rebuild deep full snapshot with strict recursion safety gates
-        old_dict = self.snapshot_dict
-        old_full = self.snapshot_full
-        self.snapshot_dict = {}
-        self.snapshot_full = None
-        
         self.snapshot_full = copy.deepcopy(self)
-        
-        self.snapshot_dict = old_dict
-        self.snapshot_full = old_full
 
     # === Device Management ===
 
@@ -100,7 +90,7 @@ class Network(BaseModule):
             return False
             
         dev = self.devices[uid]
-        allowed_fields = {"type", "priority", "name", "name_u", "tags", "os", "brand", "dname"}
+        allowed_fields = {"type", "priority", "name", "name_u", "tags", "os", "brand", "dnsname"}
         
         modified = False
         for key, value in kwargs.items():
@@ -126,18 +116,13 @@ class Network(BaseModule):
 
     # === Interface Management ===
 
-    def add_iface(self, device: Device, type: IfaceType, speed: int, max_links: int = 1, name: str = "", ip: str = "", mac: str = "") -> Iface:
+    def add_iface(self, device: Device, type: IfaceType, speed: int,
+                  priority: Priority = Priority.LOW, name: str = "", ip: str = "", mac: str = "") -> Iface:
         self.last_iface_uid += 1
-        
-        if "wifi" in type.value and max_links == 1:
-            max_links = 512
-            
-        iface = Iface(uid=self.last_iface_uid, type=type, speed=speed, device=device, name=name, ip=ip, mac=mac)
-        iface.max_links = max_links 
-        
+        iface = Iface(uid=self.last_iface_uid, type=type, speed=speed, device=device,
+                      priority=priority, name=name, ip=ip, mac=mac)
         self.ifaces[iface.uid] = iface
         device.ifaces.append(iface)
-        
         self._update_snapshots()
         return iface
 
@@ -150,7 +135,7 @@ class Network(BaseModule):
         allowed_fields = {
             "type", "speed", "name", "name_u", "ip", "mac", 
             "ip_is_dynamic", "mac_is_dynamic", "icmp_timeout", 
-            "icmp_interval", "max_links"
+            "icmp_interval"
         }
         
         modified = False
@@ -192,17 +177,16 @@ class Network(BaseModule):
             if iface2 in existing_link.ifaces:
                 raise ValueError(f"Link between interface {iface1.uid} and {iface2.uid} already exists.")
 
-        # 2. Capacity gate
-        if len(iface1.links) >= getattr(iface1, 'max_links', 1):
+        # 2. Capacity gate (wired only one, wifi unlimited)
+        if "wifi" not in iface1.type.value and len(iface1.links) >= 1:
             raise ValueError(f"Interface {iface1.uid} has reached its maximum links limit.")
-            
-        if len(iface2.links) >= getattr(iface2, 'max_links', 1):
+        if "wifi" not in iface2.type.value and len(iface2.links) >= 1:
             raise ValueError(f"Interface {iface2.uid} has reached its maximum links limit.")
 
         # 3. Deployment
         self.last_link_uid += 1
-        link = Link(uid=self.last_link_uid, ifaces=[iface1, iface2], priority=priority, name=name, type=IfaceType.UNKNOWN)
-        
+        link = Link(uid=self.last_link_uid, ifaces=(iface1, iface2),
+                    priority=priority, name=name, type=IfaceType.UNKNOWN)
         self.links[link.uid] = link
         self._update_snapshots()
         return link

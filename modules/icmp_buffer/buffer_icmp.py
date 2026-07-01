@@ -1,4 +1,9 @@
 # core/buffer_icmp.py
+
+# ---------------------------------
+# this file is needed a refactoring
+# ---------------------------------
+
 from __future__ import annotations
 import numpy as np
 from threading import RLock
