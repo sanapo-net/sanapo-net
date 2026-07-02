@@ -1,16 +1,15 @@
-# Спецификация: Вспомогательные классы, для ManagerDbNetwork (SqlStorageNetwork, JsonStorageNetwork, SqliteStorageNetwork)
+# Спецификация: Вспомогательные классы, для ManagerDbNetwork (CsvStorageNetwork, JsonStorageNetwork, SqliteStorageNetwork)
 
 
 
-### CsvStorageNetwork
+# CsvStorageNetwork
 файл: modules/db_network/csv_storage_network.py
 
-# Общее
+## Общее
 Класс отвечает за сериализацию иерархического объекта Network в три плоские CSV‑таблицы и обратное восстановление графа сети из этих таблиц.
 Формат: UTF‑8, разделитель — запятая, первая строка — заголовки столбцов.
 
-# Методы
-
+## Методы
 - `save_network_to_csv(network: Network, folder_path: str) -> bool`
 Создаёт в указанной папке три файла:
 - `devices.csv`, `ifaces.csv`, `links.csv`
@@ -27,7 +26,7 @@
 - `dict_to_link(row: dict, ifaces: dict[int, Iface]) -> Link`
 Вспомогательные методы для преобразования словаря (строки CSV) в объекты дата‑классов с восстановлением перечислений и связей.
 
-# Особенности реализации
+## Особенности реализации
 - Значения Enum записываются как их .value (строка), при чтении выполняется обратное преобразование.
 - Связь Iface → Device хранится в виде колонки device_uid.
 - Связь Link → Iface хранится в колонке iface_uids, где UID интерфейсов перечислены через пробел.
@@ -36,13 +35,13 @@
 
 
 
-### JsonStorageNetwork
+# JsonStorageNetwork
 файл: modules/db_network/json_storage_network.py
 
-# Общее
+## Общее
 Отвечает за корректную сериализацию Network в JSON-формат и обратное преобразование. Учитывает особенности дата-классов (Device, Iface, Link) и вложенных объектов (enums, ссылки на другие объекты).
 
-# Методы
+## Методы
 - `network_to_dict(network: Network) -> dict`
 Рекурсивно обходит граф сети и строит словарь, пригодный для json.dump. Включает метаданные: версия схемы, временная метка, идентификаторы сети.
 Пример структуры:
@@ -61,20 +60,20 @@
 - `save_json(network: Network, filepath: str)` — открывает файл и записывает JSON с отступами.
 - `load_json(filepath: str) -> Network` — читает файл и возвращает Network.
 
-# Особенности
+## Особенности
 - При сериализации объектов типа Enum записывается их значение (value).
 - Взаимные ссылки между объектами заменяются на UID с последующим восстановлением.
 - Поддерживается потоковая запись больших сетей (по желанию).
 
 
 
-### SqliteStorageNetwork
+# SqliteStorageNetwork
 файл: modules/db_network/sqlite_storage_network.py
 
-# Общее
+## Общее
 Дополняет SqlStorageNetwork функциями, специфичными для SQLite: управление файлом БД, настройка PRAGMA, резервное копирование, проверка целостности.
 
-# Методы
+## Методы
 - `open_db(filepath: str) -> sqlite3.Connection` — открывает (или создаёт) файл БД, применяет рекомендованные настройки (WAL-режим, foreign_keys=ON).
 - `close_db(conn: sqlite3.Connection)` — корректно закрывает соединение.
 - `backup_db(source_path: str, backup_path: str)` — создаёт резервную копию БД через SQLite Backup API.
