@@ -80,3 +80,6 @@
 - `vacuum_db(conn)` — оптимизирует файл БД.
 - `import_from_sqlite(db_path: str) -> Network` — высокоуровневый метод, объединяющий открытие БД, вызов SqlStorageNetwork для загрузки данных и закрытие.
 - `export_to_sqlite(network: Network, db_path: str) -> bool` — аналогично для экспорта.
+
+
+[список вспомогательных классов](./index.md)

@@ -13,3 +13,5 @@
     - [CsvStorageNetwork - класс суб-окна суб-приложения](./db_network.md#csvstoragenetwork)
     - [JsonStorageNetwork - класс нарезки спрайтов и генерации иконок](./db_network.md#jsonstoragenetwork)
     - [SqliteStorageNetwork - enum-класс статусов кнопок](./db_network.md#sqlitestoragenetwork)
+
+[документация программы](../../index.md)

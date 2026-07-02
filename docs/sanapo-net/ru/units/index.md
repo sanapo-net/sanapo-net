@@ -11,7 +11,7 @@
 - [DASHBOARD](./dashboard.md)
 - [DB_ICMP](./db_icmp.md)
 - [DB_MAPS](./db_maps.md)
-- [DB_NETWORK](./db_network.md)
+- [DB_NETWORK - менеджер экспорта и импорта данных о сети в sql/csv/json](./db_network.md)
 - [DB_SYS](./db_sys.md)
 - [DB_TCP](./db_tcp.md)
 - [GRAPHS_ICMP](./graphs_icmp.md)
@@ -24,4 +24,6 @@
 - [SCANNER_TCP](./scanner_tcp.md)
 - [SMART_DASHBOARD](./smart_dashboard.md)
 - [SNIFFER](./sniffer.md)
-- [UI](./ui.md)
+- [UI - Главное окно программы реализует полноценный MDI-интерфейс](./ui.md)
+
+[документация программы](../../index.md)

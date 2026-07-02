@@ -36,3 +36,6 @@ ManagerDbNetwork при старте загружает конфигурацию
 - [CsvStorageNetwork](../utility_classes/network.md#csvstoragenetwork) — общие SQL-операции (создание таблиц, вставка/чтение записей) для любой БД с SQL-интерфейсом.
 - [JsonStorageNetwork](../utility_classes/network.md#jsonstoragenetwork) — сериализация/десериализация Network в JSON и обратно.
 - [SqliteStorageNetwork](../utility_classes/network.md#sqlitestoragenetwork) — специализированная работа с файловыми базами SQLite (управление соединениями, PRAGMA, бэкап).
+
+
+[список модульных классов](./index.md)

@@ -101,3 +101,6 @@ class ThemeManager(QObject):
         self.link.setNamedColor("#0066CC")
         self.theme_changed.emit()
 ```
+
+
+[список модульных классов](./index.md)
