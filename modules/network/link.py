@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 class Link:
     """Represents a physical or wireless network connection between two interfaces."""
     uid: int
-    ifaces: list[Iface]
+    ifaces: tuple[Iface, ...]
     type: IfaceType = IfaceType.UNKNOWN
     speed: int = 0
     

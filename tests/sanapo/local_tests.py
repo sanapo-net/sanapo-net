@@ -12,11 +12,11 @@ from sanapo.views import KernelUserView
 from tests.sanapo.infra import Triggers
 
 try:
-    from core.drafts.project_enums import EvtType, CmdType
+    from common.enums import EvtType, CmdType
 except ImportError:
     import sys, os
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-    from core.drafts.project_enums import EvtType, CmdType
+    from common.enums import EvtType, CmdType
 
 
 def test_start_stop_system(ledger, node_name):

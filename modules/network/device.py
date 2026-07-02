@@ -19,4 +19,4 @@ class Device:
     tags: str = ""         # str(255)
     os: str = "UNKNOWN"    # str(31)
     brand: str = "UNKNOWN" # str(31)
-    dname: str = "UNKNOWN" # str(255)
+    dnsname: str = "UNKNOWN" # str(255)

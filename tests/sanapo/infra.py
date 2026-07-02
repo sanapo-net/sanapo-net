@@ -16,11 +16,11 @@ from sanapo.protocol import Frame
 from sanapo.addr import Addr
 
 try:
-    from core.drafts.project_enums import EvtType, CmdType
+    from common.enums import EvtType, CmdType
 except ImportError:
     import sys
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-    from core.drafts.project_enums import EvtType, CmdType
+    from common.enums import EvtType, CmdType
 
 class Triggers:
     def __init__(self, triggers_list: list = None):
