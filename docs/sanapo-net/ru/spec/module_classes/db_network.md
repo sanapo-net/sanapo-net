@@ -33,9 +33,9 @@
 ManagerDbNetwork при старте загружает конфигурацию путей по умолчанию (если требуется), но основная работа происходит в момент вызова методов. Для каждого формата создаётся экземпляр соответствующего хранилища (или используется статический метод), которому делегируется вся низкоуровневая работа.
 
 Вся специфика работы с конкретным хранилищем делегируется вспомогательным классам:
-- [CsvStorageNetwork](../utility_classes/network.md#csvstoragenetwork) — общие SQL-операции (создание таблиц, вставка/чтение записей) для любой БД с SQL-интерфейсом.
-- [JsonStorageNetwork](../utility_classes/network.md#jsonstoragenetwork) — сериализация/десериализация Network в JSON и обратно.
-- [SqliteStorageNetwork](../utility_classes/network.md#sqlitestoragenetwork) — специализированная работа с файловыми базами SQLite (управление соединениями, PRAGMA, бэкап).
+- [CsvStorageNetwork](../utility_classes/db_network.md#csvstoragenetwork) — общие SQL-операции (создание таблиц, вставка/чтение записей) для любой БД с SQL-интерфейсом.
+- [JsonStorageNetwork](../utility_classes/db_network.md#jsonstoragenetwork) — сериализация/десериализация Network в JSON и обратно.
+- [SqliteStorageNetwork](../utility_classes/db_network.md#sqlitestoragenetwork) — специализированная работа с файловыми базами SQLite (управление соединениями, PRAGMA, бэкап).
 
 
 [список модульных классов](./index.md)
