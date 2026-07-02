@@ -1,8 +1,8 @@
 # Юниты
 
-- [ANALYSATOR](./analysator.md)
-- [ANALYTIC](./analytic.md)
-- [ANALYTICS](./analytics.md)
+- [ANALYZER](./analyzer.md) — анализатор текущего состояния, сравнивает со сводками, генерирует события для ботов и UI.
+- [ANALYTIC_ENGINE](./analytic_engine.md) — движок аналитики, копается в БД, готовит сводки.
+- [ANALYTICS_VIEW](./analytics_view.md) — интерфейсный модуль для отображения результатов аналитики по запросу пользователя.
 - [BOT_EMAIL](./bot_email.md)
 - [BOT_TG](./bot_tg.md)
 - [BUFFER_ICMP](./buffer_icmp.md)
