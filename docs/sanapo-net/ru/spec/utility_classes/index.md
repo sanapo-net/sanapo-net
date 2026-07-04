@@ -14,4 +14,8 @@
     - [JsonStorageNetwork - класс нарезки спрайтов и генерации иконок](./db_network.md#jsonstoragenetwork)
     - [SqliteStorageNetwork - enum-класс статусов кнопок](./db_network.md#sqlitestoragenetwork)
 
+- [Классы отрисовки графиков](./graph_renders.md)
+    - [ChartRenderer - класс отрисовки кастомных графиков баров (столбиков метрик)](./graph_renders.md#chartrenderer)
+    - [CandlestickRenderer - класс отрисовки кастомных графиков Японских свечей](./graph_renders.md#candlestickrenderer)
+
 [документация программы](../../index.md)
