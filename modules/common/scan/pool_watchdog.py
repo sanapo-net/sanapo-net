@@ -1,15 +1,14 @@
 # modules/common/scan/pool_watchdog.py
 from __future__ import annotations
-
 import time
 import threading
 from concurrent.futures import Future
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from sanapo.logger import Logger
 
-TrackList = list[tuple[float, Future, list[any], callable[[list[any]], None], str]]
+TrackList = list[tuple[float, Future, list[Any], Callable[[list[Any]], None], str]]
 
 class PoolWatchdog:
     """Monitors running tasks and recovers from stalled threads."""
@@ -21,9 +20,9 @@ class PoolWatchdog:
 
     def track(self,
         future: Future,
-        batch: list[any],
+        batch: list[Any],
         ttl: float,
-        on_timeout: callable[[list[any]], None],
+        on_timeout: Callable[[list[Any]], None],
         group_name: str = "UnknownScanner",
     ) -> None:
         """
@@ -58,8 +57,8 @@ class PoolWatchdog:
 
         # Recovering
         for batch, on_timeout, group_name in to_recover:
-            self._logger.wrn(f"WTCH_DOG: one thread dead group '{group_name}'")
+            self._logger.wrn(f"WTCH_DOG: one thread dead in group '{group_name}'")
             try:
                 on_timeout(batch)
             except Exception as e:
-                self._logger.err(f"WTCH_DOG error in '{group_name}': {e}")
+                self._logger.err(f"WTCH_DOG error in group '{group_name}': {e}")
