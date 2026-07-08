@@ -14,9 +14,7 @@ if TYPE_CHECKING:
 
 
 class ScannerICMP:
-    """
-    ICMP scanner that uses a shared thread pool and watchdog for resilience.
-    """
+    """ICMP scanner that uses a shared thread pool and watchdog for resilience."""
 
     def __init__(
         self,
@@ -39,13 +37,14 @@ class ScannerICMP:
         self._watchdog = watchdog
         self._log = logger
 
+        # Thread-safe queue for scan results.
         self._results_queue: queue.Queue = queue.Queue()
 
+        # Check if raw sockets are available.
         self._use_raw = self._check_raw_access()
 
-        self._on_batch_timeout: Callable[[list[dict[str, Any]]], None] = (
-            self._handle_icmp_timeout
-        )
+        # Callback for watchdog timeouts.
+        self._on_batch_timeout: Callable[[list[dict[str, Any]]], None] = (self._handle_icmp_timeout)
 
     def _check_raw_access(self) -> bool:
         """
@@ -55,9 +54,7 @@ class ScannerICMP:
             True if raw sockets can be created, False otherwise.
         """
         try:
-            s = socket.socket(
-                socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP
-            )
+            s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP)
             s.close()
             return True
         except PermissionError:
@@ -83,9 +80,9 @@ class ScannerICMP:
         Sends pre-built batches to the thread pool for scanning.
 
         Args:
-            batches: mapping category_name -> list of batches
+            batches: mapping group_name -> list of batches
                      (each batch is a list of device dicts).
-            ttl_map: mapping category_name -> time-to-live (seconds)
+            ttl_map: mapping group_name -> time-to-live (seconds)
                      for tasks of that category.
         """
         for category, batch_list in batches.items():
@@ -93,6 +90,7 @@ class ScannerICMP:
             for batch in batch_list:
                 if not batch:
                     continue
+                # Timeout is taken from the first device (all share the same timeout).
                 timeout = batch[0].get("timeout", 2.0)
                 try:
                     future = self._pool.submit(
@@ -107,10 +105,10 @@ class ScannerICMP:
                         batch=batch,
                         ttl=ttl,
                         on_timeout=self._on_batch_timeout,
-                        scanner_name=f"ICMP_{category}",
-                        grace_period=0.5,
+                        group_name=f"ICMP_{category}"
                     )
                 except RuntimeError as exc:
+                    # No free slot in pool – mark whole batch as lost immediately.
                     self._log.wrn(
                         f"ICMP scanner: failed to submit batch "
                         f"in category '{category}': {exc}"
@@ -124,6 +122,7 @@ class ScannerICMP:
         Returns:
             list of device result dicts with updated 'rtt' field.
         """
+        # First, let the watchdog recover any hung tasks.
         self._watchdog.check_and_recover()
 
         results = []
@@ -146,9 +145,7 @@ class ScannerICMP:
             addresses = [dev["ip"] for dev in batch]
             hosts = multiping(addresses, timeout=timeout, privileged=self._use_raw)
             for i, host in enumerate(hosts):
-                batch[i]["rtt"] = (
-                    host.avg_rtt / 1000.0 if host.is_alive else -1.0
-                )
+                batch[i]["rtt"] = (host.avg_rtt / 1000.0 if host.is_alive else -1.0)
         except Exception:
             for dev in batch:
                 dev["rtt"] = -1.0

@@ -4,15 +4,23 @@ from enum import Enum
 # --- Network ---
 
 class Priority(str, Enum):
-    HIGH  = "high"
-    MEDIUM  = "medium"
-    LOW = "low"
+    """Host priority: HIGH (critical), MEDIUM (normal), LOW (unimportant)."""
+    HIGH   = "high"
+    MEDIUM = "medium"
+    LOW    = "low"
 
 
 class DeviceType(str, Enum):
+    """Type of network device.
+
+    Common categories include desktop PCs, laptops, IP cameras,
+    multi-function printers, VoIP phones, video recorders,
+    switches, routers, access points, IoT devices, servers,
+    and dedicated printers.
+    """
     UNKNOWN = "unknown"
-    PC = "pc"
-    LAPTOP = "LAPTOP"
+    PC      = "pc"
+    LAPTOP  = "laptop"
 
 
 class IfaceType(Enum):
@@ -32,7 +40,10 @@ class IfaceType(Enum):
     
     @property
     def generation(self) -> int:
-        """Returns the chronological weight of the standard for comparison."""
+        """
+        Returns the chronological weight of the Wi-Fi standard for comparison.
+        Used to determine the link type based on its generation.
+        """
         weights = {
             IfaceType.WIFI_SOME: 0,
             IfaceType.WIFI_4: 4,
@@ -57,28 +68,39 @@ class TickInterval(float, Enum):
     SEC_24   = 24.0
     SEC_120  = 120.0
 
-
 class SpeedShiftICMP(int, Enum):
-    SLOWER = 1
-    NORMAL = 0   
-    FASTER = -1
+    """Represents how much to shift the scanning interval."""
+    SLOWER = 1   # shift to a longer interval
+    NORMAL = 0   # keep the base interval
+    FASTER = -1  # shift to a shorter interval
+
+
+class RollWin(int, Enum):
+    MIN_1  = 60
+    MIN_3  = 180 
+    MIN_10 = 600
 
 # --- common ---
 
 class EvtType(str, Enum):
     """EventType for the shared bus"""
-    # --- cheked ---
-    # Common
     EVT_TEST = "evt_test"
 
-    # network
-    NETWORK_NEW_VER = "network_new_ver"
+    # network -> icmp-scanner
+    NEW_NETWORK_VER = "new_network_ver"
 
-    # icmp_scanner
-    ICMP_NEW_INTERVALS = "icmp_new_intervals"
+    # ui-settings -> icmp-scanner
+    NEW_ICMP_RATE = "new_icmp_race"
+    NEW_ICMP_SCAN_THREADS_MAX = "new_icmp_scan_threads_max"
+
+    # icmp-scanner -> icmp-buffer
+    TICK_10M = "tick_10m" # every calendar 10min (system time)
+    ICMP_RAW_READY = "icmp_raw_ready"
+
+    # icmp-buffer -> icmp-scanner
+    NEW_ICMP_UIDS_BY_LATENCY = "icmp_uids_by_latency_ready"
 
     # --- non cheked ---
-    # Kernel
     TICK_05 = "tick_05"
     TICK_1 = "tick_1"
     TICK_2 = "tick_2"
@@ -86,10 +108,7 @@ class EvtType(str, Enum):
     TICK_8 = "tick_8"
     TICK_24 = "tick_24"
     TICK_120 = "tick_120"
-    TICK_10M = "tick_10m" # every calendar 10min (system time)
-    # ScanICMP
-    ICMP_RAW_READY = "icmp_raw_ready"
-    # BufferICMP
+    # icmp-buffer
     ICMP_TICK_READY = "icmp_tick_ready"
     ICMP_AGR_WIN_1M_READY = "icmp_agr_win_1m_ready"
     ICMP_AGR_WIN_3M_READY = "icmp_agr_win_3m_ready"
@@ -97,14 +116,12 @@ class EvtType(str, Enum):
     ICMP_AGR_DB_10M_READY = "icmp_agr_db_10m_ready"
     ICMP_RAW_DB_10M_READY = "icmp_raw_db_10m_ready"
     ICMP_BUF_NEW_NET_VER_READY = "icmp_buf_new_net_ver_ready"
-    ICMP_UIDS_BY_LATENCY_READY = "icmp_uids_by_latency_ready"
 
 
-# for cheking and refactoring
-class RollWin(int, Enum):
-    MIN_1  = 60
-    MIN_3  = 180 
-    MIN_10 = 600
+
+# --- for cheking and refactoring ---
+
+
 
 class CmdType(str, Enum):
     """CommandType for the shared bus"""

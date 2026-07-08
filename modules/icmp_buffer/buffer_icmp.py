@@ -71,7 +71,7 @@ class BufferICMP:
                 EvtType.TICK_24: self._on_tick,
                 EvtType.TICK_120: self._on_tick,
                 EvtType.TICK_10M: self._tick_10m,
-                EvtType.NETWORK_NEW_VER: self._sync_topology,
+                EvtType.NEW_NETWORK_VER: self._sync_topology,
                 EvtType.ICMP_RAW_READY: self._scan_give_data,
             },
             commands={
@@ -112,7 +112,7 @@ class BufferICMP:
         self._uids_by_latency = self._get_uids_by_latency()
         self._secr.send_evt(EvtType.ICMP_AGR_DB_10M_READY, self._agr_db)
         self._secr.send_evt(EvtType.ICMP_RAW_DB_10M_READY, self._raw_db)
-        self._secr.send_evt(EvtType.ICMP_UIDS_BY_LATENCY_READY, {
+        self._secr.send_evt(EvtType.NEW_ICMP_UIDS_BY_LATENCY, {
             "uids_by_latency": self._uids_by_latency
         })
 

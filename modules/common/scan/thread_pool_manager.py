@@ -9,15 +9,16 @@ from typing import Any, Callable
 
 class ThreadPoolManager:
     """
-    Universal thread pool with named concurrency-limited categories.
+    A thread pool that divides work into named categories.
+    Each category has its own concurrency limit.
     """
 
     def __init__(self, max_workers: int) -> None:
         """
-        Initializes the pool with a fixed upper bound on total threads.
+        Start a pool with a fixed total number of worker threads.
 
         Args:
-            max_workers: maximum number of OS threads allowed (config limit).
+            max_workers: Maximum OS threads allowed (must be >= 1).
         """
         if max_workers < 1:
             raise ValueError("max_workers must be at least 1")
@@ -27,46 +28,62 @@ class ThreadPoolManager:
         self._threads: list[threading.Thread] = []
         self._shutdown_flag = threading.Event()
         self._lock = threading.Lock()
+
+        # Launch all workers immediately.
         for _ in range(self._max_workers):
             t = threading.Thread(target=self._worker, daemon=True)
             t.start()
             self._threads.append(t)
 
-    def get_max_workers(self) -> int:
-        """
-        Returns the maximum number of worker threads in the pool.
+    # ------------------------------------------------------------------
+    # Global worker count management
+    # ------------------------------------------------------------------
 
-        Returns:
-            Total thread limit.
-        """
+    def get_max_workers(self) -> int:
+        """Return the current total thread limit."""
         return self._max_workers
 
     def set_max_workers(self, new_limit: int) -> None:
-        """Dynamically changes the total number of worker threads."""
+        """
+        Change the total number of worker threads.
+
+        Args:
+            new_limit: New maximum thread count (>= 1).
+        """
         if new_limit < 1:
             raise ValueError("max_workers must be at least 1")
         with self._lock:
+            # Remove any threads that have already stopped.
+            self._cleanup_threads()
+
             old = self._max_workers
             if new_limit == old:
                 return
             delta = new_limit - old
             self._max_workers = new_limit
             if delta > 0:
+                # Start extra workers.
                 for _ in range(delta):
                     t = threading.Thread(target=self._worker, daemon=True)
                     t.start()
                     self._threads.append(t)
             else:
+                # Send a stop signal to the excess workers.
+                # They will be cleaned up next time _cleanup_threads runs.
                 for _ in range(-delta):
                     self._task_queue.put(None)
 
+    # ------------------------------------------------------------------
+    # Category management
+    # ------------------------------------------------------------------
+
     def new_pool(self, name: str, max_concurrent: int) -> None:
         """
-        Creates a new category with the given concurrency limit.
+        Create a new category with its own concurrency limit.
 
         Args:
-            name: unique category name (e.g. 'SEC_05').
-            max_concurrent: maximum simultaneous tasks allowed in this category.
+            name: Unique category name (e.g., 'SEC_05').
+            max_concurrent: Max tasks that can run at the same time in this category.
         """
         with self._lock:
             if name in self._pools:
@@ -75,20 +92,21 @@ class ThreadPoolManager:
 
     def close_pool(self, name: str) -> None:
         """
-        Removes a category.
-        New tasks will be rejected; already running tasks finish normally.
+        Remove a category. No new tasks will be accepted;
+        already running tasks finish normally.
 
         Args:
-            name: category name to remove.
+            name: Category to remove.
         """
         with self._lock:
             sem = self._pools.pop(name, None)
             if sem is not None:
+                # Drain the semaphore to prevent new acquires.
                 while sem.acquire(blocking=False):
                     pass
 
     def get_pool_size(self, name: str) -> int:
-        """Returns the concurrency limit for a category."""
+        """Return the concurrency limit for a category."""
         with self._lock:
             sem = self._pools.get(name)
             if sem is None:
@@ -96,7 +114,13 @@ class ThreadPoolManager:
             return sem._initial_value
 
     def resize_pool(self, name: str, max_concurrent: int) -> None:
-        """Changes the category limit; old semaphore is replaced with a new one."""
+        """
+        Update the concurrency limit of an existing category.
+
+        Args:
+            name: Category name.
+            max_concurrent: New max simultaneous tasks.
+        """
         with self._lock:
             if name not in self._pools:
                 raise ValueError(f"Pool '{name}' does not exist")
@@ -104,10 +128,10 @@ class ThreadPoolManager:
 
     def setup(self, config: dict[str, int]) -> None:
         """
-        Batch-updates concurrency limits for multiple categories.
+        Add or update multiple categories in one call.
 
         Args:
-            config: mapping {category_name: max_concurrent}.
+            config: Dict mapping category name -> concurrency limit.
         """
         for name, limit in config.items():
             if name not in self._pools:
@@ -117,13 +141,13 @@ class ThreadPoolManager:
 
     def available_slots(self, name: str) -> int:
         """
-        Returns the number of free slots in the specified category.
+        Return how many free slots are left in a category.
 
         Args:
-            name: category name.
+            name: Category name.
 
         Returns:
-            Free slots count (0 if category doesn't exist).
+            Number of free slots (0 if the category does not exist).
         """
         with self._lock:
             sem = self._pools.get(name)
@@ -138,21 +162,20 @@ class ThreadPoolManager:
         timeout: float,
     ) -> Future:
         """
-        Submits a task to the pool under the given category.
+        Hand a task to the pool. It will run when a slot is free.
 
         Args:
-            task: callable to execute.
-            args: positional arguments for the task.
-            category: category name for concurrency control.
-            ttl: maximum lifetime in seconds (for watchdog tracking).
-            timeout: network timeout inside the task
-                     (passed to task if needed).
+            task: The function to execute.
+            args: Positional arguments for the function.
+            category: The category that controls concurrency.
+            ttl: Maximum lifetime in seconds (for watchdog tracking).
+            timeout: Network timeout passed into the task.
 
         Returns:
-            Future object representing the task result.
+            A Future representing the task's result.
 
         Raises:
-            RuntimeError: if no slot is available in the category.
+            RuntimeError: If the category doesn't exist or no free slot is available.
         """
         with self._lock:
             sem = self._pools.get(category)
@@ -167,21 +190,32 @@ class ThreadPoolManager:
 
     def shutdown(self) -> None:
         """
-        Gracefully shuts down all worker threads.
+        Gracefully stop all worker threads.
+        Wait for running tasks to finish (up to 5 seconds each).
         """
         self._shutdown_flag.set()
+        with self._lock:
+            self._cleanup_threads()
+        # Send a stop signal to each live thread.
         for _ in self._threads:
             self._task_queue.put(None)
         for t in self._threads:
             t.join(timeout=5)
 
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _cleanup_threads(self) -> None:
+        """Remove threads that have already finished from the internal list."""
+        # Must be called while holding self._lock.
+        self._threads = [t for t in self._threads if t.is_alive()]
+
     def _worker(self) -> None:
-        """
-        Worker thread loop: takes tasks from the queue and executes them.
-        """
+        """Keep taking tasks from the queue and run them."""
         while not self._shutdown_flag.is_set():
             item = self._task_queue.get()
-            if item is None:
+            if item is None:          # shutdown sentinel
                 break
             task, args, timeout, future, sem = item
             try:

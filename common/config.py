@@ -39,24 +39,7 @@ class Config:
     }
 
     # --- Scheduler parameters (previously implicit in ManagerICMP) ---
-    # Minimum batch size for different intervals
-    CATEGORY_MIN_BATCH: dict[TickInterval, int] = {
-        TickInterval.SEC_05: 2,
-        TickInterval.SEC_1:  4,
-        TickInterval.SEC_2:  6,
-        TickInterval.SEC_4:  8,
-        TickInterval.SEC_8:  10,
-    }
-
-    # Base worker distribution (for proportional calculation)
-    BASE_WORKERS_PER_CATEGORY: dict[TickInterval, int] = {
-        TickInterval.SEC_05: 60,
-        TickInterval.SEC_1:  40,
-        TickInterval.SEC_2:  25,
-        TickInterval.SEC_4:  15,
-        TickInterval.SEC_8:  10,
-    }
-
+    
     # Maximum batch size per interval
     ICMP_MAX_BATCH_PER_CATEGORY: dict[TickInterval, int] = {
         TickInterval.SEC_05: 30,
@@ -73,7 +56,7 @@ class Config:
     SCAN_ICMP_DEFAULT_TTL: float = 5.0
 
 
-# for refactoring
+# --- for refactoring ---
 class OLD_Config():
     # BufferICMP
     BUF_ICMP_SPARE_COLS_MAX = 150

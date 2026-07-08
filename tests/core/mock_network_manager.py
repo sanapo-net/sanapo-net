@@ -108,7 +108,7 @@ class MockNetworkManager:
     def _send_snapshot(self) -> None:
         """Broadcasts the current network state."""
         snapshot = NetworkSnapshot(version=self._version, tab=self._tab.copy())
-        self._secr.send_evt(EvtType.NETWORK_NEW_VER, payload={"snapshot": snapshot})
+        self._secr.send_evt(EvtType.NEW_NETWORK_VER, payload={"snapshot": snapshot})
         self._log.dbg(f"MockNetwork: New version {self._version} published.")
         self._version += 1
 

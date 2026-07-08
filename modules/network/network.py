@@ -34,7 +34,7 @@ class Network(BaseModule):
         
         # Snapshot cache and versioning architecture
         self.snapshot_ver = 0
-        self.snapshot_dict: dict = {}
+        self.snapshot_dict: dict[str, any] = {"ver":0, "tab":{}}
         self.snapshot_full: Network | None = None
         
         # Initial boot snapshot generation

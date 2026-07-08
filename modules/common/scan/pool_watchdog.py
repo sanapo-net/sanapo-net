@@ -9,32 +9,22 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from sanapo.logger import Logger
 
+TrackList = list[tuple[float, Future, list[any], callable[[list[any]], None], str]]
+
 class PoolWatchdog:
-    """
-    Monitors running tasks and recovers from stalled threads.
-    """
+    """Monitors running tasks and recovers from stalled threads."""
 
     def __init__(self, logger: Logger) -> None:
-        """
-        Stores a logger reference for warning messages.
-
-        Args:
-            logger: logger instance from the framework.
-        """
         self._logger: Logger = logger
-        self._tracked: list[
-            tuple[float, Future, list[any], callable[[list[any]], None], str]
-        ] = []
+        self._tracked: TrackList = []
         self._lock = threading.Lock()
 
-    def track(
-        self,
+    def track(self,
         future: Future,
         batch: list[any],
         ttl: float,
         on_timeout: callable[[list[any]], None],
-        scanner_name: str = "UnknownScanner",
-        grace_period: float = 2.0,
+        group_name: str = "UnknownScanner",
     ) -> None:
         """
         Registers a task for deadline monitoring.
@@ -44,41 +34,32 @@ class PoolWatchdog:
             batch: list of device dicts being processed in this task.
             ttl: maximum allowed lifetime of the task (seconds).
             on_timeout: callback to mark batch as lost if deadline exceeded.
-            scanner_name: human-readable scanner identifier for logging.
-            grace_period: extra time added to ttl before triggering watchdog (seconds).
+            group_name: human-readable pool-category identifier for logging.
         """
-        deadline = time.time() + ttl + grace_period
         with self._lock:
-            self._tracked.append(
-                (deadline, future, batch, on_timeout, scanner_name)
-            )
+            self._tracked.append((time.time() + ttl, future, batch, on_timeout, group_name))
 
     def check_and_recover(self) -> None:
-        """
-        Scans all tracked tasks and triggers recovery for those exceeding deadline.
-        """
-        still_active: list[
-            tuple[float, Future, list[any], callable[[list[any]], None], str]
-        ] = []
-
+        """Scans all tracked tasks and triggers recovery for those exceeding deadline."""
+        to_recover = []
+        still_active: TrackList = []
+        
+        # Checking
         with self._lock:
-            for deadline, future, batch, on_timeout, scanner_name in self._tracked:
+            for item in self._tracked:
+                deadline, future, batch, on_timeout, group_name = item
                 if future.done():
                     continue
-
                 if time.time() > deadline:
-                    self._logger.wrn(
-                        f"WTCH_DOG: one thread dead in pool '{scanner_name}'"
-                    )
-                    try:
-                        on_timeout(batch)
-                    except Exception as e:
-                        self._logger.err(
-                            f"WTCH_DOG critical error in '{scanner_name}': {e}"
-                        )
+                    to_recover.append((batch, on_timeout, group_name))
                 else:
-                    still_active.append(
-                        (deadline, future, batch, on_timeout, scanner_name)
-                    )
-
+                    still_active.append(item)
             self._tracked = still_active
+
+        # Recovering
+        for batch, on_timeout, group_name in to_recover:
+            self._logger.wrn(f"WTCH_DOG: one thread dead group '{group_name}'")
+            try:
+                on_timeout(batch)
+            except Exception as e:
+                self._logger.err(f"WTCH_DOG error in '{group_name}': {e}")
