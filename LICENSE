@@ -1,51 +1,55 @@
-Business Source License 1.1
+# Business Source License 1.1
 
-Licensor: Alexander Vasilievich Polykov (SanaPo)
+**Licensor:** Alexander Vasilievich Polykov (SanaPo)
 
-Licensed Work: sanapo-net
+**Licensed Work:** sanapo-net
 
-The Licensed Work is (c) 2024 Alexander Vasilievich Polykov.
+The Licensed Work is (c) 2024–2026 Alexander Vasilievich Polykov.
 
 This software is licensed under the Business Source License 1.1. You may not use this file except in compliance with the License.
 
 You may obtain a copy of the License at:
 https://www.mariadb.com/bsl11/
 
-Additional Use Grant:
-- Free use for educational purposes, recruitment, and personal projects.
+**Additional Use Grant:**
+- Free use for educational purposes, non‑commercial research, recruitment, and personal projects.
 - Permitted free use for learning, code audit, and skill assessment during hiring.
 - For commercial use, contact the author.
 
-Change Date: 2030-01-01
+**Change Date:** 2030-01-01
 
-On the Change Date, the License will automatically be changed to Apache 2.0 License.
+On the Change Date, the License will automatically be changed to Apache License, Version 2.0.
 
 Software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
 
-
-
-## Third‑party libraries
+# Third‑party libraries
 
 This project includes third‑party libraries under their own licenses. By using this software, you agree to comply with those licenses.
 
-### icmplib (v3.0.4, LGPL v3)
-
+**- icmplib (v3.0.4, LGPL v3)**
 icmplib is licensed under GNU Lesser General Public License v3 (LGPL v3). When distributing software that includes icmplib, you must:
-* provide the source code of icmplib (including any modifications);
-* ensure the ability to replace icmplib with a modified compatible version (e.g., via dynamic linking or by providing object files for recompilation);
-* preserve all copyright and license notices in icmplib;
-* include copies of the LGPL v3 and GNU GPL v3 license texts.
+- provide the source code of icmplib (including any modifications);
+- ensure the ability to replace icmplib with a modified compatible version (e.g., via dynamic linking or by providing object files for recompilation);
+- preserve all copyright and license notices in icmplib;
+- include copies of the LGPL v3 and GNU GPL v3 license texts.
 
 License texts:
-* LGPL v3: https://www.gnu.org/licenses/lgpl-3.0.html
-* GNU GPL v3: https://www.gnu.org/licenses/gpl-3.0.html
-
+- LGPL v3: https://www.gnu.org/licenses/lgpl-3.0.html
+- GNU GPL v3: https://www.gnu.org/licenses/gpl-3.0.html
 Source: https://github.com/icmplib/icmplib
 
-### Other libraries (MIT/BSD‑style)
+**- PySide6 (Qt for Python, LGPL v3)**
+PySide6 is licensed under LGPL v3. The same LGPL obligations as for icmplib apply. You must allow replacement of the PySide6 library in the distributed software.
+Source: https://code.qt.io/cgit/pyside/pyside-setup.git
+License text: https://www.gnu.org/licenses/lgpl-3.0.html
 
-The project also uses the following permissively licensed libraries (Pillow, pythonping, colorama, sv_ttk, nava). Their license terms are included in the `/licenses/` folder.
+**- Pillow (MIT‑style license)**
+Pillow is licensed under its own open source license (similar to MIT). The full license text is in `/licenses/pillow.txt`.
+Source: https://github.com/python-pillow/Pillow
 
-## Note
+**- colorama (BSD‑style license)**
+colorama is licensed under a BSD‑style license. Full text in `/licenses/colorama.txt`.
+Source: https://github.com/tartley/colorama
 
-LGPL v3 requirements apply only to icmplib and its derivatives. The main project code (sanapo-net) is governed by the Business Source License 1.1 (until 2030‑01‑01) and Apache 2.0 License (afterwards).
+
+**Note:** LGPL v3 requirements apply only to icmplib and PySide6 (and their derivatives). The main project code (sanapo-net) is governed by the Business Source License 1.1 (until 2030‑01‑01) and Apache 2.0 License (afterwards). For permissively licensed libraries, you must retain their copyright notices. The full license texts of all third‑party components are stored in the `/licenses/` folder.

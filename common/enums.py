@@ -58,15 +58,14 @@ class IfaceType(Enum):
 
 class TickInterval(float, Enum):
     """Physical time constants in seconds."""
-    OFF      = -100.0
-    DEFAULT  = -1.0
-    SEC_05   = 0.5
-    SEC_1    = 1.0
-    SEC_2    = 2.0
-    SEC_4    = 4.0
-    SEC_8    = 8.0
-    SEC_24   = 24.0
-    SEC_120  = 120.0
+    OFF      = -100
+    DEFAULT  = -1
+    SEC_1    = 1
+    SEC_2    = 2
+    SEC_4    = 4
+    SEC_8    = 8
+    SEC_24   = 24
+    SEC_120  = 120
 
 class SpeedShiftICMP(int, Enum):
     """Represents how much to shift the scanning interval."""
@@ -94,20 +93,23 @@ class EvtType(str, Enum):
     NEW_ICMP_SCAN_THREADS_MAX = "new_icmp_scan_threads_max"
 
     # icmp-scanner -> icmp-buffer
-    TICK_10M = "tick_10m" # every calendar 10min (system time)
     ICMP_RAW_READY = "icmp_raw_ready"
+
+    TICK_24   = "tick_24"
+    TICK_120  = "tick_120"
+    TICK_600  = "tick_600"
+    TICK_HOUR = "tick_hour"
+    TICK_DAY  = "tick_day"
 
     # icmp-buffer -> icmp-scanner
     NEW_ICMP_UIDS_BY_LATENCY = "icmp_uids_by_latency_ready"
 
+    # some -> icmp-scanner
+    ICMP_SCAN_START = "icmp_scan_start"
+    ICMP_SCAN_STOP = "icmp_scan_stop"
+
     # --- non cheked ---
-    TICK_05 = "tick_05"
-    TICK_1 = "tick_1"
-    TICK_2 = "tick_2"
-    TICK_4 = "tick_4"
-    TICK_8 = "tick_8"
-    TICK_24 = "tick_24"
-    TICK_120 = "tick_120"
+    
     # icmp-buffer
     ICMP_TICK_READY = "icmp_tick_ready"
     ICMP_AGR_WIN_1M_READY = "icmp_agr_win_1m_ready"
@@ -118,10 +120,7 @@ class EvtType(str, Enum):
     ICMP_BUF_NEW_NET_VER_READY = "icmp_buf_new_net_ver_ready"
 
 
-
 # --- for cheking and refactoring ---
-
-
 
 class CmdType(str, Enum):
     """CommandType for the shared bus"""

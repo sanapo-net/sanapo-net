@@ -1,51 +1,49 @@
-# core/buffer_icmp.py
-
-# ---------------------------------
-# this file is needed a refactoring
-# ---------------------------------
-
+# modules/icmp_buffer/icmp_buffer.py
 from __future__ import annotations
 import numpy as np
 from threading import RLock
 from typing import TYPE_CHECKING
 
-from core.enums import EvtType, CmdType, RptType, RollWin, Metric, TickInterval, SanapoError
+
+from sanapo.base_module import BaseModule
+from sanapo.enums import RptType
+from common.enums import EvtType, CmdType, RollWin, Metric, TickInterval
+
 
 if TYPE_CHECKING:
-    from main import Tools
-    from core.network.network_manager import NetworkSnapshot
-    from core.secretary import Secretary
+    from sanapo.protocol import Frame
+    from sanapo.base_unit import UnitModuleView
     from numpy.typing import NDArray
-    from core.protocol import Frame
-    from core.logger import Logger
 
-class BufferICMP:
+class BufferICMP(BaseModule):
     """
     High-performance ICMP metrics buffer using circular NumPy matrices.
     Handles real-time ingestion, multi-tier aggregation, and thread-safe access.
     """
-    def __init__(self, tools: Tools, secr: Secretary, logger: Logger) -> None:
-        self._tools: Tools = tools
-        self._secr: Secretary = secr
-        self._log: Logger = logger
+    
+    SPARE_MAX = 150 # maximum reserve of matrix columns for potential hosts
+    SPARE_TARGET = 100 # desired reserve of matrix columns for potential hosts
+    # minimum percentage of host scan iterations for a time interval
+    MIN_PER_SAMPLES_10M_DB = 40  # %
+    MIN_PER_SAMPLES_10M = 40     # %
+    MIN_PER_SAMPLES_3M = 70      # %
+    MIN_PER_SAMPLES_1M = 90      # %
+    MIN_PER_SAMPLES_DEFAULT = 90 # %
+
+
+    def __init__(self, unit_view: UnitModuleView) -> None:
+        super().__init__(unit_view)
         
         self._lock = RLock()
         
         self._tick_id: int = -1
-        self._net_snapshot: NetworkSnapshot = None
+        self._net_snapshot: dict[str, any] = None
         
-        self._spare_max: int = tools.config.BUF_ICMP_SPARE_COLS_MAX
-        self._spare_target: int = tools.config.BUF_ICMP_SPARE_COLS_TARGET
-        # Validate configuration consistency
-        if self._spare_max <= self._spare_target:
-            err = f"Config Error: MAX ({self._spare_max}) <= TARGET ({self._spare_target})"
-            raise SanapoError(err)
-        
-        # Agredated data by last "calendar" 10 minute
+        # Aggregated data by last "calendar" 10 minute
         self._agr_db: dict[str, any] = None # {'start_time': start_time, 'res': res}
         # Raw data by last "calendar" 10 minute
         self._raw_db: dict[str, any] = None
-        # Agredated data by last and prev time 1/3/10 minute window
+        # Aggregated data by last and prev time-windows 1/3/10 minutes
         self._agr_win = dict[RollWin, list[dict[str, any]]] = {
             RollWin.MIN_1: [{}, {}],
             RollWin.MIN_3: [{}, {}],
@@ -53,35 +51,26 @@ class BufferICMP:
         }
 
         self._active_uids: list[str] = [] # holds active interfaces' uids
-        self._free_slots: list[int] = list(range(self._spare_target - 1, -1, -1))
+        self._free_slots: list[int] = list(range(self.SPARE_TARGET - 1, -1, -1))
         self._uid_to_col: dict[str, int] = {} # {uid:id_of_col_in_to_matrix, ...}
         
-        self._matrix_h = 10 * 60 / TickInterval.SEC_05 # 10 minutes
-        self._matrix = np.full((self._matrix_h, self._spare_target), np.nan, dtype=np.float16)
+        self._matrix_h = 10 * 60 / TickInterval.SEC_1 # 10 minutes / min interval
+        self._matrix = np.full((self._matrix_h, self.SPARE_TARGET), np.nan, dtype=np.float32)
         self._head_idx: int = 0
 
-        self._secr.start()
-        self._secr.configure_subscriptions(
-            events={
-                EvtType.TICK_05: self._on_tick,
-                EvtType.TICK_1: self._on_tick,
-                EvtType.TICK_2: self._on_tick,
-                EvtType.TICK_4: self._on_tick,
-                EvtType.TICK_8: self._on_tick,
-                EvtType.TICK_24: self._on_tick,
-                EvtType.TICK_120: self._on_tick,
-                EvtType.TICK_10M: self._tick_10m,
-                EvtType.NEW_NETWORK_VER: self._sync_topology,
-                EvtType.ICMP_RAW_READY: self._scan_give_data,
-            },
-            commands={
-                CmdType.ICMP_BUF_AGR_WIN_REQ: self._on_agr_win_req,
-                CmdType.ICMP_BUF_AGR_DB_10M_REQ: self._on_agr_db_10m_req,
-                CmdType.ICMP_BUF_RAW_DB_10M_REQ: self._on_raw_db_10m_req,
-            }
-        )
+        self.v.secr.configure_subscriptions(events={
+            EvtType.NEW_NETWORK_VER: self._sync_topology,
+            EvtType.ICMP_RAW_READY: self._on_icmp_raw_ready,
+            EvtType.TICK_600: self._tick_10m,
+        },
+        commands={
+            CmdType.ICMP_BUF_AGR_WIN_REQ: self._on_agr_win_req,
+            CmdType.ICMP_BUF_AGR_DB_10M_REQ: self._on_agr_db_10m_req,
+            CmdType.ICMP_BUF_RAW_DB_10M_REQ: self._on_raw_db_10m_req,
+            CmdType.ICMP_BUF_UIDS_BY_LATENCY_REQ: self._on_uids_by_latency_req,
+        })
 
-    # --- REPORTS ---
+    # --- CALLBACKS ---
 
     def _on_agr_win_req(self, cmd: Frame) -> None:
         win = cmd.payload.get("RollWin", False)
@@ -89,16 +78,16 @@ class BufferICMP:
             payload = {win.name:[self._agr_win[win][0], self._agr_win[win][1]]}
         else:
             payload = {key.name:[val[0], val[1]] for key, val in self._agr_win.items()}
-        self._secr.send_rpt(cmd.sender, cmd.cmd_id, RptType.DONE, payload)
+        self.v.secr.send_rpt(cmd.sender, cmd.cmd_id, RptType.DONE, payload)
 
     def _on_agr_db_10m_req(self, cmd: Frame) -> None:
-        self._secr.send_rpt(cmd.sender, cmd.cmd_id, RptType.DONE, self._agr_db)
+        self.v.secr.send_rpt(cmd.sender, cmd.cmd_id, RptType.DONE, self._agr_db)
 
     def _on_raw_db_10m_req(self, cmd: Frame) -> None:
-        self._secr.send_rpt(cmd.sender, cmd.cmd_id, RptType.DONE, self._raw_db)
+        self.v.secr.send_rpt(cmd.sender, cmd.cmd_id, RptType.DONE, self._raw_db)
 
     def _on_uids_by_latency_req(self, cmd: Frame) -> None:
-        self._secr.send_rpt(cmd.sender, cmd.cmd_id, RptType.DONE, {
+        self.v.secr.send_rpt(cmd.sender, cmd.cmd_id, RptType.DONE, {
             "uids_by_latency": self._uids_by_latency
         })
 
@@ -106,13 +95,13 @@ class BufferICMP:
 
     def _tick_10m(self, evt: Frame) -> None:
         """Prepares data objects for the last 10 calendar minutes in raw and aggregated."""
-        time = evt.payload["time"]
+        time = evt.payload["timestamp"]
         self._agr_db = self._get_agr_db_10m_data(time)
         self._raw_db = self._get_raw_db_10m_data(time)
         self._uids_by_latency = self._get_uids_by_latency()
-        self._secr.send_evt(EvtType.ICMP_AGR_DB_10M_READY, self._agr_db)
-        self._secr.send_evt(EvtType.ICMP_RAW_DB_10M_READY, self._raw_db)
-        self._secr.send_evt(EvtType.NEW_ICMP_UIDS_BY_LATENCY, {
+        self.v.secr.send_evt(EvtType.ICMP_AGR_DB_10M_READY, self._agr_db)
+        self.v.secr.send_evt(EvtType.ICMP_RAW_DB_10M_READY, self._raw_db)
+        self.v.secr.send_evt(EvtType.NEW_ICMP_UIDS_BY_LATENCY, {
             "uids_by_latency": self._uids_by_latency
         })
 
@@ -125,40 +114,35 @@ class BufferICMP:
             self._matrix[self._head_idx, :] = np.nan
             self._tick_id = evt.payload['tick_id']
 
-    def _scan_give_data(self, evt: Frame) -> None:
+    def _on_icmp_raw_ready(self, frame: Frame) -> None:
         """
         Ingest raw metrics from ICMP Scanner.
         Writes data from the scanner to the matrix.
         If the time for sliding window aggregation has arrived,
         it aggregates and emits an event with the aggregated data.
         """
-        # 1. Checkings
-        payload_i = evt.payload
+        # 1. Checking
+        payload_in = frame.payload
         # Frame with outdated topology data
-        if payload_i['snapshot'].version != self._net_snapshot.version:
-            self._log.info(f"[{evt.sender.name}] provided data with outdated snapshot")
+        if payload_in['snapshot_ver'] != self._net_snapshot["ver"]:
+            self.v.log.wrn(f"[{frame.sender.unit}] provided ICMP raw data with outdated snapshot")
             return
-        # Frame with outdated tick data
-        if payload_i['tick_id'] != self._tick_id:
-            self._log.info(f"[{evt.sender.name}] provided data with outdated tick_id")
-            return
-        # Frame with current data
+        
         with self._lock:
-            
             # 2. Send one tick metrics
             # Map UIDs from scanner's order to matrix columns
             target_cols = [self._uid_to_col[uid] for uid in self._active_uids]
             try:
                 # Fast vectorized assignment
-                self._matrix[self._head_idx, target_cols] = payload_i['data']
-                payload_o = {
+                self._matrix[self._head_idx, target_cols] = payload_in['data']
+                payload_out = {
                     'snapshot': self._net_snapshot,
                     'tick_id': self._tick_id,
-                    'data': payload_i['data']
+                    'data': payload_in['data']
                 }
-                self._secr.send_evt(EvtType.ICMP_TICK_READY, payload_o)
+                self.v.secr.send_evt(EvtType.ICMP_TICK_READY, payload_out)
             except Exception as e:
-                self._log.crit(f"Ingest failed: {e}")
+                self.v.log.crt(f"Ingest failed: {e}")
 
             # 3. Send one tick metrics
             # Configuration mapping: Tick Type -> Associated Windows/Events
@@ -172,35 +156,32 @@ class BufferICMP:
                 EvtType.TICK_24: [
                     (RollWin.MIN_3,  EvtType.ICMP_AGR_WIN_3M_READY),
                     (RollWin.MIN_1,  EvtType.ICMP_AGR_WIN_1M_READY)
-                ],
-                EvtType.TICK_8: [
-                    (RollWin.MIN_1,  EvtType.ICMP_AGR_WIN_1M_READY)
                 ]
             }
             # Get tasks for the current event
-            ticks_to_process = evt_map.get(evt.evt_type, [])
+            ticks_to_process = evt_map.get(frame.evt_type, [])
 
             for win, ready_evt in ticks_to_process:
-                payload_o = {
+                payload_out = {
                     'snapshot': self._net_snapshot,
                     'tick_id':  self._tick_id,
                     'data':     self._get_agr_win_data(win)
                 }
                 
                 # Update cache: Shift old data out, insert fresh data at the head
-                self._agr_win[win].insert(0, payload_o)
+                self._agr_win[win].insert(0, payload_out)
                 self._agr_win[win].pop()
                 
-                self._secr.send_evt(ready_evt, payload_o)
+                self.v.secr.send_evt(ready_evt, payload_out)
 
 
     # --- NET TOPOLOGY & MEMORY ---
 
-    def _sync_topology(self, evt: Frame) -> None:
+    def _sync_topology(self, frame: Frame) -> None:
         """Updates matrix schema and mapping based on NetworkTopology."""
         with self._lock:
-            self._net_snapshot = evt.payload["snapshot"]
-            new_uids_set = set(self._net_snapshot.tab.keys())
+            self._net_snapshot = frame.payload["snapshot"]
+            new_uids_set = set(self._net_snapshot["tab"].keys())
             curr_uids_set = set(self._uid_to_col.keys())
 
             # Remove deleted: Wipe columns and free slots
@@ -218,11 +199,11 @@ class BufferICMP:
 
             # Finalize order
             self._active_uids = list(self._net_snapshot.tab.keys())
-            if len(self._free_slots) > self._tools.config.BUF_ICMP_SPARE_COLS_MAX:
+            if len(self._free_slots) > self.SPARE_MAX:
                 self._compact_matrix()
             
             payload = {"snapshot": self._net_snapshot, "uid_to_col": self._uid_to_col.copy()}
-            self._secr.send_evt(EvtType.ICMP_BUF_NEW_NET_VER_READY, payload)
+            self.v.secr.send_evt(EvtType.ICMP_BUF_NEW_NET_VER_READY, payload)
 
     def _expand_matrix(self) -> None:
         """Extends matrix width by 100 columns."""
@@ -235,7 +216,7 @@ class BufferICMP:
     def _compact_matrix(self) -> None:
         """Smart partial compaction of the matrix to optimize memory usage."""
         # Fast check without lock for better performance
-        if len(self._free_slots) <= self._spare_max:
+        if len(self._free_slots) <= self.SPARE_MAX:
             return
         
         with self._lock:
@@ -243,11 +224,11 @@ class BufferICMP:
             free_w = len(self._free_slots)
             occupied_w = len(self._uid_to_col)
             actual_w = self._matrix.shape[1]
-            target_w = occupied_w + self._spare_target
+            target_w = occupied_w + self.SPARE_TARGET
             
             if actual_w != (occupied_w + free_w):
                 # Critical bug: data/index mismatch. Reporting and aborting.
-                self._log.crit(f"Memory Invariant Violation! {actual_w} != {occupied_w} + {free_w}")
+                self.v.log.crt(f"Memory Invariant Violation! {actual_w} != {occupied_w} + {free_w}")
                 return
             
             # Check if shrinking is physically necessary
@@ -264,7 +245,7 @@ class BufferICMP:
                 for uid in uids_to_move:
                     if not safe_slots:
                         # Resource saturation: no room to evacuate. Postponing.
-                        self._log.err("Evacuation failed: No safe slots!")
+                        self.v.log.err("Evacuation failed: No safe slots!")
                         return 
                     
                     old_col = self._uid_to_col[uid]
@@ -273,14 +254,14 @@ class BufferICMP:
                     # Physical data relocation (Column copy)
                     self._matrix[:, new_col] = self._matrix[:, old_col]
                     self._uid_to_col[uid] = new_col
-                    self._log.info(f"Evacuated {uid} from col {old_col} to {new_col}")
+                    self.v.log.inf(f"Evacuated {uid} from col {old_col} to {new_col}")
 
             # Physical Truncation
             self._matrix = self._matrix[:, :target_w]
             
             # Index Reconciliation
             self._free_slots = [s for s in self._free_slots if s < target_w]
-            self._log.info(f"Compaction success: {actual_w} -> {target_w}")
+            self.v.log.inf(f"Compaction success: {actual_w} -> {target_w}")
 
 
     # --- AGGREGATION ---
@@ -358,7 +339,7 @@ class BufferICMP:
             inf_mask = np.isinf(data[Metric.CV])
             if np.any(inf_mask):
                 bad_uids = [self._active_uids[i] for i in np.where(inf_mask)[0]]
-                self._log.err(f"Zero RTT anomaly detected: {bad_uids}")
+                self.v.log.err(f"Zero RTT anomaly detected: {bad_uids}")
 
             # Cleaning up CV (replacing Inf with NaN)
             data[Metric.CV] = np.where(np.isfinite(data[Metric.CV]), data[Metric.CV], np.nan)
@@ -456,11 +437,11 @@ class BufferICMP:
     
     def _get_min_samples_for_window(self, window, rows):
         threshold_map = {
-            RollWin.MIN_1:  self._tools.config.BUF_ICMP_MIN_PER_SAMPLES_1M,
-            RollWin.MIN_3:  self._tools.config.BUF_ICMP_MIN_PER_SAMPLES_3M,
-            RollWin.MIN_10: self._tools.config.BUF_ICMP_MIN_PER_SAMPLES_10M
+            RollWin.MIN_1:  self.MIN_PER_SAMPLES_1M,
+            RollWin.MIN_3:  self.MIN_PER_SAMPLES_3M,
+            RollWin.MIN_10: self.MIN_PER_SAMPLES_10M
         }
-        min_pct = threshold_map.get(window, self._tools.config.BUF_ICMP_MIN_PER_SAMPLES_DEFAULT)
+        min_pct = threshold_map.get(window, self.MIN_PER_SAMPLES_DEFAULT)
         return int(rows * (min_pct / 100))
 
     def _get_max_streak(m_2d) -> NDArray[np.int32]:
