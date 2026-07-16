@@ -55,6 +55,7 @@ class HostState:
     current_scan_interval: Optional[TickInterval] = None
     last_rtt: Optional[float] = None
     ready_to_report: bool = False
+    scan_start_tick_id: int = 0 # tick id when the scan started
 
 
 class ScannerICMP(BaseModule):
@@ -66,7 +67,8 @@ class ScannerICMP(BaseModule):
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
-        self.snapshot_ver: int # version of network snapshot
+        self.tick_id: int = 0
+        self.snapshot_ver: int = 0 # network snapshot version
         self._registry: Dict[int, HostState] = {}
         self._pending_tasks: Dict[int, asyncio.Task] = {}
         self._semaphore: asyncio.Semaphore = None
@@ -75,7 +77,6 @@ class ScannerICMP(BaseModule):
 
         self._scanning_enabled: bool = False
         self._speed_shift: SpeedShiftICMP = SpeedShiftICMP.NORMAL
-        self._sort_order: List[int] = []
         self._intervals: List[TickInterval] = ALLOWED_INTERVALS
         self._last_big_tick_sent: Dict[int, int] = {period: -1 for period, _ in BIG_TICKS}
         self._start_delay: float = 0.001
@@ -84,13 +85,12 @@ class ScannerICMP(BaseModule):
         self.v.secr.configure_subscriptions(events={
             EvtType.NEW_NETWORK_VER: self._on_new_network,
             EvtType.NEW_ICMP_RATE: self._on_new_rate,
-            EvtType.NEW_ICMP_UIDS_BY_LATENCY: self._on_latency,
             EvtType.ICMP_SCAN_START: self._on_scan_start,
             EvtType.ICMP_SCAN_STOP: self._on_scan_stop,
         })
 
     # ------------------------------------------------------------------
-    # Жизненный цикл
+    # Lifecycle
     # ------------------------------------------------------------------
     def start(self) -> bool:
         if self._loop is not None:
@@ -105,7 +105,7 @@ class ScannerICMP(BaseModule):
         self.v.stop_timeout = 1.1
         if self._loop is None:
             return True
-        if self._loop.is_running():
+        if self._loop.is_running() and hasattr(self, '_stop_async'):
             self._loop.call_soon_threadsafe(self._stop_async.set)
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
@@ -126,15 +126,12 @@ class ScannerICMP(BaseModule):
         }
 
     # ------------------------------------------------------------------
-    # Колбэки
+    # Callbacks
     # ------------------------------------------------------------------
     def _on_new_network(self, frame: Frame) -> None:
         asyncio.run_coroutine_threadsafe(self._input_queue.put(frame), self._loop)
 
     def _on_new_rate(self, frame: Frame) -> None:
-        asyncio.run_coroutine_threadsafe(self._input_queue.put(frame), self._loop)
-
-    def _on_latency(self, frame: Frame) -> None:
         asyncio.run_coroutine_threadsafe(self._input_queue.put(frame), self._loop)
 
     def _on_scan_start(self, frame: Frame) -> None:
@@ -144,7 +141,7 @@ class ScannerICMP(BaseModule):
         asyncio.run_coroutine_threadsafe(self._input_queue.put(frame), self._loop)
 
     # ------------------------------------------------------------------
-    # Фоновый цикл
+    # Background loop
     # ------------------------------------------------------------------
     def _run_event_loop(self) -> None:
         asyncio.set_event_loop(self._loop)
@@ -169,7 +166,7 @@ class ScannerICMP(BaseModule):
             self._pending_tasks.clear()
 
     # ------------------------------------------------------------------
-    # Обработка событий
+    # Event processing
     # ------------------------------------------------------------------
     async def _process_events(self) -> None:
         while not self._stop_async.is_set():
@@ -183,8 +180,6 @@ class ScannerICMP(BaseModule):
                     await self._handle_new_network(frame)
                 elif kind == EvtType.NEW_ICMP_RATE:
                     await self._handle_new_rate(frame)
-                elif kind == EvtType.NEW_ICMP_UIDS_BY_LATENCY:
-                    await self._handle_new_latency(frame)
                 elif kind == EvtType.ICMP_SCAN_START:
                     await self._handle_scan_start(frame)
                 elif kind == EvtType.ICMP_SCAN_STOP:
@@ -196,7 +191,7 @@ class ScannerICMP(BaseModule):
             self.v.log.err("NEW_NETWORK_VER without snapshot")
             return
         tab = snapshot.get("tab") if isinstance(snapshot, dict) else None
-        if not tab:
+        if tab is None:
             self.v.log.err("NEW_NETWORK_VER: Snapshot without 'tab'")
             return
         self.snapshot_ver = snapshot.get("ver", 0)
@@ -206,11 +201,6 @@ class ScannerICMP(BaseModule):
         new_shift = frame.payload.get("icmp_speed_shift", SpeedShiftICMP.NORMAL)
         if new_shift != self._speed_shift:
             self._apply_speed_shift(new_shift)
-
-    async def _handle_new_latency(self, frame: Frame) -> None:
-        uids = frame.payload.get("uids_by_latency", [])
-        if uids:
-            self._sort_order = uids
 
     async def _handle_scan_start(self, frame: Frame) -> None:
         if not self._scanning_enabled:
@@ -233,7 +223,10 @@ class ScannerICMP(BaseModule):
                     })
                     h.ready_to_report = False
                     h.current_scan_interval = None
-                self._send_report(results)
+                try:
+                    self._send_report(results)
+                except Exception as e:
+                    self.v.log.err(f"Failed to send ICMP report: {e}")
 
             for task in self._pending_tasks.values():
                 task.cancel()
@@ -246,7 +239,7 @@ class ScannerICMP(BaseModule):
                 h.current_scan_interval = None
 
     # ------------------------------------------------------------------
-    # Реестр хостов
+    # Host registry
     # ------------------------------------------------------------------
     async def _rebuild_registry(self, tab: Dict[int, Dict[str, Any]]) -> None:
         new_uids = set(tab.keys())
@@ -255,6 +248,7 @@ class ScannerICMP(BaseModule):
             if uid not in new_uids:
                 if uid in self._pending_tasks:
                     self._pending_tasks[uid].cancel()
+                    self._pending_tasks.pop(uid, None)
                 del self._registry[uid]
 
         for uid, dev_data in tab.items():
@@ -289,7 +283,6 @@ class ScannerICMP(BaseModule):
                 self._update_effective_params(h)
                 self._registry[uid] = h
 
-        self._sort_registry_by_latency()
         self._update_start_delay()
         self.v.log.inf(f"Registry rebuilt with {len(self._registry)} hosts")
 
@@ -310,8 +303,8 @@ class ScannerICMP(BaseModule):
 
     def _select_timeout(self, base_interval_sec: float, preferred_timeout: float) -> float:
         """
-        Выбирает максимальный таймаут из Config.ICMP_TIMEOUTS,
-        который не превышает preferred_timeout и меньше base_interval.
+        Selects the maximum timeout from Config.ICMP_TIMEOUTS
+        that does not exceed preferred_timeout and is less than base_interval.
         """
         max_allowed = min(preferred_timeout, base_interval_sec)
         candidates = [t for t in Config.ICMP_TIMEOUTS if t <= max_allowed]
@@ -319,8 +312,8 @@ class ScannerICMP(BaseModule):
 
     def _select_effective_timeout(self, effective_interval: TickInterval, base_timeout: float) -> float:
         """
-        Выбирает максимальный таймаут из Config.ICMP_TIMEOUTS,
-        который не превышает base_timeout и меньше effective_interval.
+        Selects the maximum timeout from Config.ICMP_TIMEOUTS
+        that does not exceed base_timeout and is less than effective_interval.
         """
         max_allowed = min(base_timeout, effective_interval.value)
         candidates = [t for t in Config.ICMP_TIMEOUTS if t <= max_allowed]
@@ -340,12 +333,9 @@ class ScannerICMP(BaseModule):
                 self._start_delay = delay
                 return
 
-    def _sort_registry_by_latency(self) -> None:
-        pass
-
     # ------------------------------------------------------------------
-    # Планировщик тиков
-    # ------------------------------------------------------------------
+    # Tick scheduler
+    # ------------------------------------------------------------------        
     async def _tick_scheduler(self) -> None:
         while not self._stop_async.is_set():
             try:
@@ -355,25 +345,35 @@ class ScannerICMP(BaseModule):
                     await asyncio.sleep(delay)
 
                 current_sec = int(time.time())
-                second_in_cycle = current_sec % 24
-                tick_number = 24 if second_in_cycle == 0 else second_in_cycle
+                tick_size = self.get_tick_size(current_sec % 86400)   # seconds into day
+                self.tick_id += 1
 
-                asyncio.create_task(self._execute_tick(tick_number))
-                self._send_big_ticks(current_sec)
+                asyncio.create_task(self._execute_tick(self.tick_id, tick_size))
+                self._send_big_ticks(self.tick_id, current_sec)
             except Exception as e:
                 self.v.log.err(f"Error in tick scheduler: {e}")
                 await asyncio.sleep(0.1)
 
-    def _send_big_ticks(self, current_sec: int) -> None:
+    def _send_big_ticks(self, tick_id, current_sec: int) -> None:
         for period, evt_type in BIG_TICKS:
             if current_sec % period == 0 and self._last_big_tick_sent.get(period, -1) != current_sec:
-                self.v.secr.send_evt(evt_type, payload={"timestamp": current_sec})
+                self.v.secr.send_evt(evt_type, payload={"timestamp": current_sec, "tick_id": tick_id})
                 self._last_big_tick_sent[period] = current_sec
 
+    @staticmethod
+    def get_tick_size(second_of_day: int) -> int:
+        """
+        second_of_day - number of second in day (0..86399)
+        """
+        for divisor in (24, 16, 8, 4, 2):
+            if second_of_day % divisor == 0:
+                return divisor
+        return 1
+
     # ------------------------------------------------------------------
-    # Выполнение тика
+    # Tick execution
     # ------------------------------------------------------------------
-    async def _execute_tick(self, tick: int) -> None:
+    async def _execute_tick(self, tick_id, tick_size: int) -> None:
         if not self._scanning_enabled:
             return
 
@@ -384,17 +384,22 @@ class ScannerICMP(BaseModule):
                 results.append({
                     "uid": h.uid,
                     "rtt": h.last_rtt,
-                    "effective_interval": int(h.current_scan_interval.value) if h.current_scan_interval else 0
+                    "tick_id": h.scan_start_tick_id
                 })
                 h.ready_to_report = False
+                h.scan_start_tick_id = 0
                 h.current_scan_interval = None
-            self._send_report(results)
+            try:
+                self._send_report(results)
+            except Exception as e:
+                self.v.log.err(f"Failed to send ICMP report: {e}")
 
         for h in self._registry.values():
-            if self._is_tick_match(tick, h.effective_interval):
+            if self._is_tick_match(tick_size, h.effective_interval):
                 if h.uid in self._pending_tasks:
                     continue
                 h.current_scan_interval = h.effective_interval
+                h.scan_start_tick_id = tick_id
                 h.ready_to_report = False
                 task = asyncio.create_task(self._ping_one(h))
                 self._pending_tasks[h.uid] = task
@@ -405,7 +410,7 @@ class ScannerICMP(BaseModule):
         return tick % int(interval.value) == 0
 
     # ------------------------------------------------------------------
-    # Пинг
+    # Ping
     # ------------------------------------------------------------------
     async def _ping_one(self, host: HostState) -> None:
         await asyncio.sleep(self._start_delay)
@@ -424,7 +429,8 @@ class ScannerICMP(BaseModule):
                 if not self._warned_icmplib:
                     self.v.log.wrn("icmplib not installed, all pings will fail")
                     self._warned_icmplib = True
-                host.ready_to_report = True
+                if self._scanning_enabled:
+                    host.ready_to_report = True
             except Exception:
                 host.last_rtt = -1.0
             else:
@@ -432,12 +438,13 @@ class ScannerICMP(BaseModule):
                     host.ready_to_report = True
 
     # ------------------------------------------------------------------
-    # Отчётность
+    # Reporting
     # ------------------------------------------------------------------
     def _send_report(self, results: List[Dict[str, Any]]) -> None:
         payload = {
             "snapshot_ver": self.snapshot_ver,
             "timestamp": time.time(),
+            "tick_id": self.tick_id,
             "results": results,
         }
         self.v.secr.send_evt(EvtType.ICMP_RAW_READY, payload)

@@ -1,4 +1,5 @@
 # sanapo-net Architecture
+[Russian version](./ARCHITECTURE.RU.md)
 
 <div align="center"><img src="docs/sanapo/sanapo_logo.png" alt="logo" width="600"/></div>
 

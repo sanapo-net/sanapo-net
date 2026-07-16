@@ -1,4 +1,6 @@
-# sanapo-net — Network Monitoring & Analysis System
+# sanapo-net — Network Monitoring & Analysis 
+[Russian version](./README.RU.md)
+
 <div align="center"><img src="docs/sanapo/sanapo_logo.png" alt="Logo" width="800"/></div>
 
 [https://img.shields.io/badge/License-BSL-orange](https://www.mariadb.com/bsl11/)

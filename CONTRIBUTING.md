@@ -1,4 +1,6 @@
 # Contributing to sanapo-net
+[Russian version](./CONTRIBUTING.md)
+
 
 We welcome any contributions to sanapo-net! Here's how you can help.
 

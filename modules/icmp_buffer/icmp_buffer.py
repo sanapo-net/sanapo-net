@@ -2,7 +2,7 @@
 from __future__ import annotations
 import numpy as np
 from threading import RLock
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Dict
 
 
 from sanapo.base_module import BaseModule
@@ -36,8 +36,9 @@ class BufferICMP(BaseModule):
         
         self._lock = RLock()
         
-        self._tick_id: int = -1
-        self._net_snapshot: dict[str, any] = None
+        self._last_tick_id: int = -1          # last profit tick_id
+        self._tick_to_row: Dict[int, int] = {} # mapping tick_id -> row index   
+        self._net_snapshot: dict[str, any] = {"ver": -1, "tab": {}}
         
         # Aggregated data by last "calendar" 10 minute
         self._agr_db: dict[str, any] = None # {'start_time': start_time, 'res': res}
@@ -62,6 +63,8 @@ class BufferICMP(BaseModule):
             EvtType.NEW_NETWORK_VER: self._sync_topology,
             EvtType.ICMP_RAW_READY: self._on_icmp_raw_ready,
             EvtType.TICK_600: self._tick_10m,
+            EvtType.TICK_120: self._tick_120,
+            EvtType.TICK_24: self._tick_24,
         },
         commands={
             CmdType.ICMP_BUF_AGR_WIN_REQ: self._on_agr_win_req,
@@ -91,6 +94,31 @@ class BufferICMP(BaseModule):
             "uids_by_latency": self._uids_by_latency
         })
 
+    def _tick_120(self, evt: Frame) -> None:
+        """Updates aggregations for a 10-minute window and sends an event."""
+        with self._lock:
+            payload_out = self._get_agr_win_data(RollWin.MIN_10)
+            payload_out["tick_id"] = evt.payload.get("tick_id", self._last_tick_id)
+            self._agr_win[RollWin.MIN_10].insert(0, payload_out)
+            self._agr_win[RollWin.MIN_10].pop()
+            self.v.secr.send_evt(EvtType.ICMP_AGR_WIN_10M_READY, payload_out)
+
+    def _tick_24(self, evt: Frame) -> None:
+        """Updates aggregations for 3-minute and 1-minute windows."""
+        with self._lock:
+            # 3-minutes
+            payload_out_3m = self._get_agr_win_data(RollWin.MIN_3)
+            payload_out_3m["tick_id"] = evt.payload.get("tick_id", self._last_tick_id)
+            self._agr_win[RollWin.MIN_3].insert(0, payload_out_3m)
+            self._agr_win[RollWin.MIN_3].pop()
+            self.v.secr.send_evt(EvtType.ICMP_AGR_WIN_3M_READY, payload_out_3m)
+            # 1-minutes
+            payload_out_1m = self._get_agr_win_data(RollWin.MIN_1)
+            payload_out_1m["tick_id"] = evt.payload.get("tick_id", self._last_tick_id)
+            self._agr_win[RollWin.MIN_1].insert(0, payload_out_1m)
+            self._agr_win[RollWin.MIN_1].pop()
+            self.v.secr.send_evt(EvtType.ICMP_AGR_WIN_1M_READY, payload_out_1m)
+
     # --- TICKING & DATA INGESTION ---
 
     def _tick_10m(self, evt: Frame) -> None:
@@ -105,74 +133,85 @@ class BufferICMP(BaseModule):
             "uids_by_latency": self._uids_by_latency
         })
 
-    def _on_tick(self, evt: Frame) -> None:
-        """Advances the circular buffer offset and executes pre-ingestion routines."""
-        with self._lock:
-            # Advance head pointer (0 -> 1199 -> 0)
-            self._head_idx = (self._head_idx + 1) % self._matrix_h
-            # Wipe the new row to clear the oldest data (10min old)
-            self._matrix[self._head_idx, :] = np.nan
-            self._tick_id = evt.payload['tick_id']
-
     def _on_icmp_raw_ready(self, frame: Frame) -> None:
-        """
-        Ingest raw metrics from ICMP Scanner.
-        Writes data from the scanner to the matrix.
-        If the time for sliding window aggregation has arrived,
-        it aggregates and emits an event with the aggregated data.
-        """
-        # 1. Checking
         payload_in = frame.payload
-        # Frame with outdated topology data
-        if payload_in['snapshot_ver'] != self._net_snapshot["ver"]:
-            self.v.log.wrn(f"[{frame.sender.unit}] provided ICMP raw data with outdated snapshot")
-            return
-        
-        with self._lock:
-            # 2. Send one tick metrics
-            # Map UIDs from scanner's order to matrix columns
-            target_cols = [self._uid_to_col[uid] for uid in self._active_uids]
-            try:
-                # Fast vectorized assignment
-                self._matrix[self._head_idx, target_cols] = payload_in['data']
-                payload_out = {
-                    'snapshot': self._net_snapshot,
-                    'tick_id': self._tick_id,
-                    'data': payload_in['data']
-                }
-                self.v.secr.send_evt(EvtType.ICMP_TICK_READY, payload_out)
-            except Exception as e:
-                self.v.log.crt(f"Ingest failed: {e}")
 
-            # 3. Send one tick metrics
-            # Configuration mapping: Tick Type -> Associated Windows/Events
-            # Ordered from largest to smallest window
+        # Checking the snapshot version
+        if payload_in.get('snapshot_ver', -1) != self._net_snapshot.get("ver", -1):
+            self.v.log.wrn(f"[{frame.sender.unit}] sent ICMP raw data with outdated snapshot")
+            return
+
+        tick_id = payload_in['tick_id']
+        results = payload_in['results']  # list of {uid, rtt}
+
+        with self._lock:
+            # --- 1. Calculate pointer shift ---
+            if self._last_tick_id == -1:
+                # First receive – write to current row (head_idx)
+                row = self._head_idx
+                diff = 0
+            else:
+                diff = tick_id - self._last_tick_id
+                if diff <= 0:
+                    self.v.log.wrn(f"Stale tick_id {tick_id} (last {self._last_tick_id})")
+                    return
+                # If diff > 1, ticks were skipped – clear rows that will be overwritten
+                cleared = min(diff, self._matrix_h)
+                for i in range(1, cleared + 1):
+                    row_to_clear = (self._head_idx + i) % self._matrix_h
+                    self._matrix[row_to_clear, :] = np.nan
+                # New row
+                row = (self._head_idx + diff) % self._matrix_h
+                self._head_idx = row
+
+            # --- 2. Write results to row ---
+            for item in results:
+                uid = item['uid']
+                rtt = item['rtt']   # -1 for timeout
+                col = self._uid_to_col.get(uid)
+                if col is not None:
+                    self._matrix[row, col] = rtt
+                else:
+                    self.v.log.wrn(f"UID {uid} not in matrix mapping")
+
+            # --- 3. Update state ---
+            self._tick_to_row[tick_id] = row
+            self._last_tick_id = tick_id
+
+            # --- 4. Send event to subscribers ---
+            self.v.secr.send_evt(EvtType.ICMP_TICK_READY, {
+                'snapshot': self._net_snapshot,
+                'tick_id': tick_id,
+                'data': results
+            })
+
+            # --- 5. Window aggregations (if needed) ---
+            # Check if tick_id is a multiple of 120 or 24
             evt_map = {
-                EvtType.TICK_120: [
+                120: [
                     (RollWin.MIN_10, EvtType.ICMP_AGR_WIN_10M_READY),
                     (RollWin.MIN_3,  EvtType.ICMP_AGR_WIN_3M_READY),
                     (RollWin.MIN_1,  EvtType.ICMP_AGR_WIN_1M_READY)
                 ],
-                EvtType.TICK_24: [
+                24: [
                     (RollWin.MIN_3,  EvtType.ICMP_AGR_WIN_3M_READY),
                     (RollWin.MIN_1,  EvtType.ICMP_AGR_WIN_1M_READY)
                 ]
             }
-            # Get tasks for the current event
-            ticks_to_process = evt_map.get(frame.evt_type, [])
+            ticks_to_process = []
+            if tick_id % 120 == 0:
+                ticks_to_process = evt_map[120]
+            elif tick_id % 24 == 0:
+                ticks_to_process = evt_map[24]
 
             for win, ready_evt in ticks_to_process:
-                payload_out = {
-                    'snapshot': self._net_snapshot,
-                    'tick_id':  self._tick_id,
-                    'data':     self._get_agr_win_data(win)
-                }
-                
-                # Update cache: Shift old data out, insert fresh data at the head
+                payload_out = self._get_agr_win_data(win)
+                payload_out["tick_id"] = self._last_tick_id
+                # Update aggregation cache (insert at front, pop last)
                 self._agr_win[win].insert(0, payload_out)
                 self._agr_win[win].pop()
-                
                 self.v.secr.send_evt(ready_evt, payload_out)
+                
 
 
     # --- NET TOPOLOGY & MEMORY ---
@@ -208,7 +247,7 @@ class BufferICMP(BaseModule):
     def _expand_matrix(self) -> None:
         """Extends matrix width by 100 columns."""
         with self._lock:
-            ext = np.full((self._matrix_h, 100), np.nan, dtype=np.float16)
+            ext = np.full((self._matrix_h, 100), np.nan, dtype=np.float32)
             old_w = self._matrix.shape[1]
             self._matrix = np.hstack([self._matrix, ext])
             self._free_slots.extend(range(old_w + 99, old_w - 1, -1))
@@ -308,7 +347,7 @@ class BufferICMP(BaseModule):
         Calculate metrics for rolling windows (1m, 3m, 10m).
         Uses unified statistics engine and applies window-specific metrics.
         """
-        rows = int(window / TickInterval.SEC_05)
+        rows = int(window / TickInterval.SEC_1)
         min_samples = self._get_min_samples_for_window(window, rows)
 
         with self._lock:
@@ -358,7 +397,7 @@ class BufferICMP(BaseModule):
         """Aggregates full 10-minute matrix for SQL export."""
         # 1. Take data
         with self._lock:
-            data = self._matrix.copy()
+            data = np.roll(self._matrix, shift=-(self._head_idx + 1), axis=0)
             uid_to_col = self._uid_to_col.copy()
             snap = self._net_snapshot
         # 2. Masks for data filtering
@@ -444,6 +483,7 @@ class BufferICMP(BaseModule):
         min_pct = threshold_map.get(window, self.MIN_PER_SAMPLES_DEFAULT)
         return int(rows * (min_pct / 100))
 
+    @staticmethod
     def _get_max_streak(m_2d) -> NDArray[np.int32]:
         # Used into _calc_*(). Vertical stack a False row to handle edge cases at the start
         m = np.vstack([np.zeros(m_2d.shape[1], dtype=bool), m_2d])
