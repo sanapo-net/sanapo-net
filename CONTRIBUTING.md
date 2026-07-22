@@ -1,5 +1,5 @@
 # Contributing to sanapo-net
-[Russian version](./CONTRIBUTING.md)
+[Русская версия](./docs/ru/contributing.md)
 
 
 We welcome any contributions to sanapo-net! Here's how you can help.
@@ -47,3 +47,5 @@ You can also create a branch right here, just message me!
 - Contact the author directly: Alexander Polyakov (SanaPo). mrsanapo100#gmail.com
 
 Thank you for helping make sanapo-net better!
+
+[Documentation](README.md)

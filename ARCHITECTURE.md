@@ -1,5 +1,5 @@
 # sanapo-net Architecture
-[Russian version](./ARCHITECTURE.RU.md)
+[Русская версия](./docs/ru/architecture.md)
 
 <div align="center"><img src="docs/sanapo/sanapo_logo.png" alt="logo" width="600"/></div>
 
@@ -140,6 +140,6 @@ When multiple sanapo systems are federated, messages are serialised to JSON and 
 - The bot framework allows adding additional communication channels (e.g., Slack) following the same pattern as BotEmail/BotTg.
 
 # References
-- [Architecture of the sanapo framework](./docs/sanapo/en/architecture.md) – description of units, threads, tiers, message protocol, and boot process.
-- [sanapo framework documentation](./docs/sanapo/en/index.md)
-- [sanapo-net program documentation](./docs/sanapo-net/en/index.md) – detailed technical documentation for each unit and auxiliary classes.
+- [Architecture of the sanapo framework](https://github.com/sanapo-net/sanapo/blob/master/docs/ru/architecture.md) – description of units, threads, tiers, message protocol, and boot process.
+- [sanapo framework documentation](https://github.com/sanapo-net/sanapo/blob/master/docs/ru/readme.md)
+- [Documentation](README.md)

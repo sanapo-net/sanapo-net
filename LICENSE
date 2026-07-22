@@ -53,3 +53,5 @@ Source: https://github.com/tartley/colorama
 
 
 **Note:** LGPL v3 requirements apply only to icmplib and PySide6 (and their derivatives). The main project code (sanapo-net) is governed by the Business Source License 1.1 (until 2030‑01‑01) and Apache 2.0 License (afterwards). For permissively licensed libraries, you must retain their copyright notices. The full license texts of all third‑party components are stored in the `/licenses/` folder.
+
+[Documentation](README.md)

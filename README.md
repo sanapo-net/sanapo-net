@@ -1,10 +1,7 @@
 # sanapo-net — Network Monitoring & Analysis 
-[Russian version](./README.RU.md)
+[Русская версия](./docs/ru/readme.md)
 
-<div align="center"><img src="docs/sanapo/sanapo_logo.png" alt="Logo" width="800"/></div>
-
-[https://img.shields.io/badge/License-BSL-orange](https://www.mariadb.com/bsl11/)
-[https://img.shields.io/badge/Python-3.10%252B-blue]
+<div align="center"><img src="docs/sanapo/sanapo_logo.png" alt="Logo" width="600"/></div>
 
 Rapid detection of network failures, scale analysis, problem prediction, network topology visualization, and convenient dashboards.
 
@@ -28,20 +25,17 @@ Rapid detection of network failures, scale analysis, problem prediction, network
 - **Key Libraries**: PySide6, Pillow, colorama, icmplib (later Pandas, Matplotlib)
 - **Framework**: sanapo (in‑house) — units, threads, tiers, message bus
 
-# Architecture (briefly)
-
-The project consists of isolated **units**, grouped into tiers and started in a specific order. Data exchange happens through a message bus (commands, events, reports). Hot data is stored in NumPy circular buffers, cold data in aggregated SQLite databases. Dashboard applications communicate only with buffers and ready‑made aggregates, without loading raw storages. See [ARCHITECTURE.md](./ARCHITECTURE.RU.md) for details.
-
-# Contributing
-
-Want to help? Check [CONTRIBUTING.md](./CONTRIBUTING.md). We are especially interested in help with GUI migration to PySide6, topology engine optimization, and test writing.
-To write most modules, you don’t even need to understand multithreading and asynchronous programming, nor worry about thread safety or complexity of information transfer between modules — even if modules are on different physical machines accessible over the network — these issues are handled by the sanapo framework.
-
-# License
-
-BSL 1.1 until 2030‑01‑01, then Apache 2.0. Details in [LICENSE](./LICENSE).
+- [Brief General Description of the Program](./docs/en/description.md) - for end users and management.
+- [Architecture](ARCHITECTURE.md) - a technical description of the system.
+- [Glossary](./docs/en/glossary.md) - terms used in the project.
+- [Units (now only russian lang)](./docs/ru/units/index.md) - cards for all units of the sanapo-net program.
+- Specifications - technical specifications for developers.
+    - [Module Class Specifications (now only russian lang)](./docs/ru/spec/module_classes/index.md)
+    - [Utility Class Specifications (now only russian lang)](./docs/ru/spec/utility_classes/index.md)
+- [Contribute to the project](CONTRIBUTING.md)
+- [License](../../LICENSE) - BSL 1.1 until 2030-01-01, then Apache 2.0.
 
 # Author
 
 Alexander Vasilievich Polykov (SanaPo)
-mrsanapo100#gmail.com
+mrsanapo100@gmail.com
