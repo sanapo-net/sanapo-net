@@ -1,7 +1,7 @@
 # sanapo-net — Система мониторинга и анализа сетей
 [English version](../../README.md)
 
-<div align="center"><img src="docs/sanapo/sanapo_logo.png" alt="Логотип" width="600"/></div>
+<div align="center"><img src="../sanapo_net_logo.png" alt="Логотип" width="600"/></div>
 
 Быстрое обнаружение сетевых сбоев, анализ их масштаба, прогнозирование проблем, визуализация топологии сети и удобные дашборды.
 

@@ -1,7 +1,7 @@
 # sanapo-net — Network Monitoring & Analysis 
 [Русская версия](./docs/ru/readme.md)
 
-<div align="center"><img src="docs/sanapo/sanapo_logo.png" alt="Logo" width="600"/></div>
+<div align="center"><img src="docs/sanapo_net_logo.png" alt="Logo" width="600"/></div>
 
 Rapid detection of network failures, scale analysis, problem prediction, network topology visualization, and convenient dashboards.
 
@@ -23,7 +23,9 @@ Rapid detection of network failures, scale analysis, problem prediction, network
 - **GUI**: PySide6 (Qt for Python) — multi‑window MDI with themes
 - **Databases**: SQLite (WAL mode), future PostgreSQL/MySQL
 - **Key Libraries**: PySide6, Pillow, colorama, icmplib (later Pandas, Matplotlib)
-- **Framework**: sanapo (in‑house) — units, threads, tiers, message bus
+- **Framework**: sanapo (in‑house) — units, threads, tiers, message bus [LICENSE](https://github.com/sanapo-net/sanapo/blob/master/LICENSE)
+
+# Documentation
 
 - [Brief General Description of the Program](./docs/en/description.md) - for end users and management.
 - [Architecture](ARCHITECTURE.md) - a technical description of the system.
